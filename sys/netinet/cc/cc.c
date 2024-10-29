@@ -83,6 +83,7 @@
 #define CC_DEFAULT "cubic"
 #endif
 
+uint32_t hystart_enable = 1;
 uint32_t hystart_minrtt_thresh = 4000;
 uint32_t hystart_maxrtt_thresh = 16000;
 uint32_t hystart_n_rttsamples = 8;
@@ -720,6 +721,11 @@ SYSCTL_PROC(_net_inet_tcp_cc, OID_AUTO, available,
 SYSCTL_NODE(_net_inet_tcp_cc, OID_AUTO, hystartplusplus,
     CTLFLAG_RW | CTLFLAG_MPSAFE, NULL,
     "New Reno related HyStart++ settings");
+
+SYSCTL_UINT(_net_inet_tcp_cc_hystartplusplus, OID_AUTO, hystart_enable,
+	CTLFLAG_RW,
+	&hystart_enable, 1,
+	"Is HyStart++ enabled");
 
 SYSCTL_UINT(_net_inet_tcp_cc_hystartplusplus, OID_AUTO, minrtt_thresh,
     CTLFLAG_RW,

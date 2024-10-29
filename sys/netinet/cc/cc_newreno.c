@@ -191,7 +191,11 @@ newreno_cb_init(struct cc_var *ccv, void *ptr)
 	 * the socket option gets strobed and
 	 * we have not hit a loss
 	 */
-	nreno->newreno_flags = CC_NEWRENO_HYSTART_ENABLED;
+	if (hystart_enable) {
+		nreno->newreno_flags = CC_NEWRENO_HYSTART_ENABLED;
+	} else {
+		nreno->newreno_flags = 0;
+	}
 	/* At init set both to infinity */
 	nreno->css_lastround_minrtt = 0xffffffff;
 	nreno->css_current_round_minrtt = 0xffffffff;
@@ -354,8 +358,11 @@ newreno_after_idle(struct cc_var *ccv)
 		 * Re-enable hystart if we have been idle.
 		 */
 		nreno->newreno_flags &= ~CC_NEWRENO_HYSTART_IN_CSS;
-		nreno->newreno_flags |= CC_NEWRENO_HYSTART_ENABLED;
-		newreno_log_hystart_event(ccv, nreno, 12, CCV(ccv, snd_ssthresh));
+
+		if (hystart_enable) {
+			nreno->newreno_flags |= CC_NEWRENO_HYSTART_ENABLED;
+			newreno_log_hystart_event(ccv, nreno, 12, CCV(ccv, snd_ssthresh));
+		}
 	}
 }
 

@@ -50,6 +50,7 @@
 
 #include <sys/cdefs.h>
 #include <opt_cc.h>
+#include "sys/syslog.h"
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/libkern.h>
@@ -391,6 +392,7 @@ VNET_SYSINIT(vnet_cc_sysinit, SI_SUB_PROTO_IFATTACHDOMAIN, SI_ORDER_ANY,
 void
 newreno_cc_post_recovery(struct cc_var *ccv)
 {
+	log(LOG_NOTICE, "Newreno Exiting congestion recovery\n");
 	int pipe;
 
 	if (IN_FASTRECOVERY(CCV(ccv, t_flags))) {

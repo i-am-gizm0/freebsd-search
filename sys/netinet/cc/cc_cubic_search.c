@@ -155,6 +155,10 @@ cubic_log_hystart_event(struct cc_var *ccv, struct cubic *cubicd, uint8_t mod, u
 	}
 }
 
+// <<<<<SEARCH IMPL>>>>> update_bins
+
+// <<<<<SEARCH IMPL>>>>> sub_bins
+
 static void
 cubic_does_slow_start(struct cc_var *ccv, struct cubic *cubicd)
 {
@@ -169,6 +173,7 @@ cubic_does_slow_start(struct cc_var *ccv, struct cubic *cubicd)
 	 * doesn't rely on tcpcb vars.
 	 */
 	log(LOG_NOTICE, "Cubic slow start");
+	// <<<<<SEARCH IMPL>>>>> Slow start ack_arrival (switch between Hystart, ABC, SEARCH in here)
 
 	u_int cw = CCV(ccv, snd_cwnd);
 	u_int incr = CCV(ccv, t_maxseg);
@@ -406,6 +411,7 @@ cubic_data_sz(void)
 static int
 cubic_cb_init(struct cc_var *ccv, void *ptr)
 {
+	// <<<<<SEARCH IMPL>>>>> Initialize variables here
 	log(LOG_NOTICE, "Init CB");
 	struct cubic *cubic_data;
 

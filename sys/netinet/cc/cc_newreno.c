@@ -64,6 +64,7 @@
 #include <sys/mutex.h>
 #include <sys/socketvar.h>
 #include <sys/sysctl.h>
+#include <sys/syslog.h>
 #include <sys/systm.h>
 
 #include <net/vnet.h>
@@ -93,6 +94,7 @@ static void	newreno_rttsample(struct cc_var *ccv, uint32_t usec_rtt, uint32_t rx
 static 	int	newreno_cb_init(struct cc_var *ccv, void *);
 static size_t	newreno_data_sz(void);
 
+uint32_t hystart_enable = 1;
 
 VNET_DECLARE(uint32_t, newreno_beta);
 #define V_newreno_beta VNET(newreno_beta)
@@ -195,6 +197,7 @@ newreno_cb_init(struct cc_var *ccv, void *ptr)
 		nreno->newreno_flags = CC_NEWRENO_HYSTART_ENABLED;
 	} else {
 		nreno->newreno_flags = 0;
+		log(LOG_DEBUG, "Hystart++ disabled\n");
 	}
 	/* At init set both to infinity */
 	nreno->css_lastround_minrtt = 0xffffffff;
@@ -600,6 +603,11 @@ SYSCTL_DECL(_net_inet_tcp_cc_newreno);
 SYSCTL_NODE(_net_inet_tcp_cc, OID_AUTO, newreno,
     CTLFLAG_RW | CTLFLAG_MPSAFE, NULL,
     "New Reno related settings");
+
+SYSCTL_UINT(_net_inet_tcp_cc_newreno, OID_AUTO, hystart_enable,
+	CTLFLAG_RW,
+	&hystart_enable, 1,
+	"Is HyStart++ enabled");
 
 SYSCTL_PROC(_net_inet_tcp_cc_newreno, OID_AUTO, beta,
     CTLFLAG_VNET | CTLTYPE_UINT | CTLFLAG_RW | CTLFLAG_NEEDGIANT,

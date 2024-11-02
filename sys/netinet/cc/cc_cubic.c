@@ -357,10 +357,8 @@ cubic_after_idle(struct cc_var *ccv)
 		 * Re-enable hystart if we have been idle.
 		 */
 		cubic_data->flags &= ~CUBICFLAG_HYSTART_IN_CSS;
-		if (hystart_enable) {
-			cubic_data->flags |= CUBICFLAG_HYSTART_ENABLED;
-			cubic_log_hystart_event(ccv, cubic_data, 12, CCV(ccv, snd_ssthresh));
-		}
+		cubic_data->flags |= CUBICFLAG_HYSTART_ENABLED;
+		cubic_log_hystart_event(ccv, cubic_data, 12, CCV(ccv, snd_ssthresh));
 	}
 	newreno_cc_after_idle(ccv);
 	cubic_data->t_epoch = ticks;
@@ -397,11 +395,7 @@ cubic_cb_init(struct cc_var *ccv, void *ptr)
 	cubic_data->mean_rtt_usecs = 1;
 
 	ccv->cc_data = cubic_data;
-	if (hystart_enable) {
-		cubic_data->flags = CUBICFLAG_HYSTART_ENABLED;
-	} else {
-		cubic_data->flags = 0;
-	}
+	cubic_data->flags = CUBICFLAG_HYSTART_ENABLED;
 	/* At init set both to infinity */
 	cubic_data->css_lastround_minrtt = 0xffffffff;
 	cubic_data->css_current_round_minrtt = 0xffffffff;

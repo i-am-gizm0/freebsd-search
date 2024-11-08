@@ -57,6 +57,7 @@
 
 #include <sys/param.h>
 #include <sys/kernel.h>
+#include <sys/khelp.h>
 #include <sys/malloc.h>
 #include <sys/module.h>
 #include <sys/socket.h>
@@ -83,8 +84,11 @@
 #include <netinet/cc/cc_module.h>
 #include <netinet/cc/cc_newreno_search.h>
 #include <netinet/cc/cc_search_common.h>
-#include "sys/syslog.h"
+#include <sys/syslog.h>
 
+#include <netinet/khelp/h_ertt.h>
+
+static int  newreno_search_mod_init(void);
 static void	newreno_cb_destroy(struct cc_var *ccv);
 static void	newreno_ack_received(struct cc_var *ccv, ccsignal_t type);
 static void	newreno_after_idle(struct cc_var *ccv);
@@ -103,6 +107,7 @@ VNET_DECLARE(uint32_t, newreno_beta_ecn);
 
 struct cc_algo newreno_search_cc_algo = {
 	.name = "newreno_search",
+	.mod_init = newreno_search_mod_init,
 	.cb_destroy = newreno_cb_destroy,
 	.ack_received = newreno_ack_received,
 	.after_idle = newreno_after_idle,
@@ -114,6 +119,17 @@ struct cc_algo newreno_search_cc_algo = {
 	.cb_init = newreno_cb_init,
 	.cc_data_sz = newreno_data_sz,
 };
+
+static int ertt_id;
+
+static int newreno_search_mod_init(void) {
+	ertt_id = khelp_get_id("ertt");
+	if (ertt_id <= 0) {
+		printf("%s: h_ertt module not found\n", __func__);
+		return (ENOENT);
+	}
+	return (0);
+}
 
 // <<<<<SEARCH IMPL>>>>> note: no conn_init defined
 // <<<<<SEARCH IMPL>>>>> note: no mod init defined
@@ -279,6 +295,7 @@ static void search_exit_slow_start(struct cc_var* ccv, uint32_t rtt_us) {
 	uint64_t difference_bytes_acked = 0;
 	uint32_t congestion_index = 0;
 	uint32_t initial_rtt = 0;
+	/*
 	if (cwnd_rollback == 1) {
 		uint32_t rollback_cwnd = CCV(ccv, snd_cwnd);
 
@@ -299,6 +316,7 @@ static void search_exit_slow_start(struct cc_var* ccv, uint32_t rtt_us) {
 			CCV(ccv, snd_cwnd) = max(TCP_INIT_CWND, CCV(ccv, snd_cwnd) - rollback_cwnd);
 		}
 	}
+	*/
 
 	nreno->search_stop_search = 1;
 	CCV(ccv, snd_ssthresh) = CCV(ccv, snd_cwnd);
@@ -325,8 +343,13 @@ static uint64_t search_interpolate_delivered_bytes(struct cc_var* ccv, uint32_t 
 	return interpoldated_delv_bytes;
 }
 
+static uint32_t get_rtt(struct cc_var* ccv) {
+	struct ertt* e_t = khelp_get_osd(&CCV(ccv, t_osd), ertt_id);
+	return e_t->rtt;
+}
+
 static void search_update(struct cc_var* ccv) {
-	uint32_t rtt_us = ... ; // TODO: get unsmoothed rtt
+	uint32_t rtt_us = get_rtt(ccv);
 
 	struct newreno *nreno = ccv->cc_data;
 
@@ -365,11 +388,11 @@ static void search_update(struct cc_var* ccv) {
 			prev_delv_bytes_over = search_calculate_window_bytes(ccv, prev_index);
 			prev_delv_bytes_under = search_calculate_window_bytes(ccv, prev_index - 1);
 
-			if (do_intpld == 1) {
-				prev_delv_bytes = search_interpolate_delivered_bytes(ccv, rtt_us, curr_index, prev_index, prev_delv_bytes_under, prev_delv_bytes_over);
-			} else {
+			// if (do_intpld == 1) {
+			// 	prev_delv_bytes = search_interpolate_delivered_bytes(ccv, rtt_us, curr_index, prev_index, prev_delv_bytes_under, prev_delv_bytes_over);
+			// } else {
 				prev_delv_bytes = prev_delv_bytes_over;
-			}
+			// }
 
 			if (prev_delv_bytes > 0) {
 				norm_diff = ((2 * prev_delv_bytes) - curr_delv_bytes) * 100 / (2 * prev_delv_bytes);
@@ -438,9 +461,9 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 				/* Disable use of CSS in the future except long idle  */
 				nreno->newreno_flags &= ~CC_NEWRENO_HYSTART_ENABLED;
 				newreno_log_hystart_event(ccv, nreno, 11, CCV(ccv, snd_ssthresh));
-			} else if (/* doing search */) {
+			} // else if (/* doing search */) {
 				nreno->search_stop_search = 1;
-			}
+			// }
 			if (V_tcp_do_rfc3465) {
 				if (ccv->flags & CCF_ABC_SENTAWND)
 					ccv->flags &= ~CCF_ABC_SENTAWND;
@@ -549,7 +572,9 @@ newreno_after_idle(struct cc_var *ccv)
 		nreno->newreno_flags &= ~CC_NEWRENO_HYSTART_IN_CSS;
 		nreno->newreno_flags |= CC_NEWRENO_HYSTART_ENABLED;
 		newreno_log_hystart_event(ccv, nreno, 12, CCV(ccv, snd_ssthresh));
-	}
+	} // else if (/* doing search */) {
+		nreno->search_stop_search = 0;
+	// }
 }
 
 /*

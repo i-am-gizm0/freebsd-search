@@ -280,7 +280,6 @@ static void search_update_missed_bins(struct cc_var* ccv) {
 static uint64_t search_calculate_window_bytes(struct cc_var* ccv, uint32_t index) {
 	struct newreno* nreno = ccv->cc_data;
 
-	uint32_t i;
 	uint64_t delivered_bytes = 0;
 	for (uint32_t i = index - SEARCH_W + 1; i <= index; i++) {
 		delivered_bytes += nreno->search_bin[i % SEARCH_NUM_BINS];
@@ -292,10 +291,10 @@ static uint64_t search_calculate_window_bytes(struct cc_var* ccv, uint32_t index
 static void search_exit_slow_start(struct cc_var* ccv, uint32_t rtt_us) {
 	struct newreno* nreno = ccv->cc_data;
 
+	/*
 	uint64_t difference_bytes_acked = 0;
 	uint32_t congestion_index = 0;
 	uint32_t initial_rtt = 0;
-	/*
 	if (cwnd_rollback == 1) {
 		uint32_t rollback_cwnd = CCV(ccv, snd_cwnd);
 
@@ -357,7 +356,7 @@ static void search_update(struct cc_var* ccv) {
 	uint32_t curr_index = 0;
 	int32_t prev_index = 0;
 	uint64_t curr_delv_bytes = 0, prev_delv_bytes = 0;
-	uint64_t prev_delv_bytes_under = 0, prev_delv_bytes_over = 0;
+	uint64_t /* prev_delv_bytes_under = 0,*/ prev_delv_bytes_over = 0;
 	int32_t norm_diff = 0;
 	uint32_t now_us = ticks * tick; // current clock time in us
 
@@ -386,7 +385,7 @@ static void search_update(struct cc_var* ccv) {
 			/* Calculate delivered bytes for the current and previous windows */
 			curr_delv_bytes = search_calculate_window_bytes(ccv, curr_index);
 			prev_delv_bytes_over = search_calculate_window_bytes(ccv, prev_index);
-			prev_delv_bytes_under = search_calculate_window_bytes(ccv, prev_index - 1);
+			// prev_delv_bytes_under = search_calculate_window_bytes(ccv, prev_index - 1);
 
 			// if (do_intpld == 1) {
 			// 	prev_delv_bytes = search_interpolate_delivered_bytes(ccv, rtt_us, curr_index, prev_index, prev_delv_bytes_under, prev_delv_bytes_over);

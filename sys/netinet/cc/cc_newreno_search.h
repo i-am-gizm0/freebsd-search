@@ -27,7 +27,8 @@
 #ifndef _CC_NEWRENO_H
 #define _CC_NEWRENO_H
 
-#define CCALGONAME_NEWRENO "newreno"
+#include "cc_search_common.h"
+#define CCALGONAME_NEWRENO "newreno_search"
 
 struct newreno {
 	uint32_t beta;
@@ -42,6 +43,14 @@ struct newreno {
 	uint32_t css_fas_at_css_entry;
 	uint32_t css_lowrtt_fas;
 	uint32_t css_last_fas;
+
+	// <<<<<SEARCH>>>>>
+	uint32_t search_bin[SEARCH_NUM_BINS];	// Array to keep bytes for bins
+	uint32_t search_bin_duration_us;		// Duration of each bin in microseconds
+	uint32_t search_bin_total;				// Total number of bins
+	uint32_t search_bin_end_us;				// End time of the latest bin in microseconds
+	uint8_t  search_stop_search;			// The choke/exit point based on SEARCH is found
+	uint64_t search_prev_bytes_acked;		// Previous total bytes acked
 };
 
 struct cc_newreno_opts {

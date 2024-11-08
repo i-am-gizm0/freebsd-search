@@ -81,7 +81,8 @@
 #include <netinet/tcp_hpts.h>
 #include <netinet/cc/cc.h>
 #include <netinet/cc/cc_module.h>
-#include <netinet/cc/cc_newreno.h>
+#include <netinet/cc/cc_newreno_search.h>
+#include <netinet/cc/cc_search_common.h>
 #include "sys/syslog.h"
 
 static void	newreno_cb_destroy(struct cc_var *ccv);
@@ -176,6 +177,17 @@ newreno_data_sz(void)
 	return (sizeof(struct newreno));
 }
 
+static void
+newreno_search_reset(struct cc_var *ccv, struct newreno *nreno)
+{
+	memset(nreno->search_bin, 0, sizeof(nreno->search_bin));
+	nreno->search_bin_duration_us = 0;
+	nreno->search_bin_total = 0;
+	nreno->search_bin_end_us = 0;
+	nreno->search_stop_search = 0;
+	nreno->search_prev_bytes_acked = ccv->bytes_this_ack;
+}
+
 static int
 newreno_cb_init(struct cc_var *ccv, void *ptr)
 {
@@ -210,6 +222,9 @@ newreno_cb_init(struct cc_var *ccv, void *ptr)
 	nreno->css_fas_at_css_entry = 0;
 	nreno->css_lowrtt_fas = 0;
 	nreno->css_last_fas = 0;
+
+	// <<<<<SEARCH>>>>>
+	newreno_search_reset(ccv, nreno);
 	return (0);
 }
 
@@ -221,8 +236,157 @@ newreno_cb_destroy(struct cc_var *ccv)
 }
 
 // <<<<<SEARCH IMPL>>>>> update_bins
+static void search_update_missed_bins(struct cc_var* ccv) {
+	struct newreno* nreno = ccv->cc_data;
 
-// <<<<<SEARCH IMPL>>>>> sub_bins
+	int32_t missed_bin = 0;
+	uint32_t now_us = ticks * tick;
+
+	missed_bin = (now_us - nreno->search_bin_end_us) / nreno->search_bin_duration_us;
+
+	if (missed_bin > 0) {
+		nreno->search_bin_total += missed_bin;
+		nreno->search_bin_end_us += missed_bin * nreno->search_bin_duration_us;
+
+		if (missed_bin >= SEARCH_NUM_BINS) {
+			memset(nreno->search_bin, 0, sizeof(nreno->search_bin));
+		} else {
+			while (missed_bin >= 0) {
+				nreno->search_bin[(nreno->search_bin_total - missed_bin) % SEARCH_NUM_BINS] = 0;
+				missed_bin--;
+			}
+		}
+	}
+}
+
+// <<<<<SEARCH IMPL>>>>> sum_bins
+/** calculates delivered bytes for a window considering additional logic */
+static uint64_t search_calculate_window_bytes(struct cc_var* ccv, uint32_t index) {
+	struct newreno* nreno = ccv->cc_data;
+
+	uint32_t i;
+	uint64_t delivered_bytes = 0;
+	for (uint32_t i = index - SEARCH_W + 1; i <= index; i++) {
+		delivered_bytes += nreno->search_bin[i % SEARCH_NUM_BINS];
+	}
+
+	return delivered_bytes;
+}
+
+static void search_exit_slow_start(struct cc_var* ccv, uint32_t rtt_us) {
+	struct newreno* nreno = ccv->cc_data;
+
+	uint64_t difference_bytes_acked = 0;
+	uint32_t congestion_index = 0;
+	uint32_t initial_rtt = 0;
+	if (cwnd_rollback == 1) {
+		uint32_t rollback_cwnd = CCV(ccv, snd_cwnd);
+
+		initial_rtt = nreno->search_bin_duration_us * SEARCH_NUM_BINS * 10 / search_window_size_time;
+		congestion_index = nreno->search_bin_total - ((2 * initial_rtt) / nreno->search_bin_duration_us);
+
+		if (nreno->search_bin_total - congestion_index > SEARCH_NUM_BINS) {
+			congestion_index = nreno->search_bin_total - SEARCH_NUM_BINS + 1;
+		}
+
+		for (uint32_t i = congestion_index + 1; i <= nreno->search_bin_total; i++) {
+			difference_bytes_acked += nreno->search_bin[i % SEARCH_NUM_BINS];
+		}
+
+		rollback_cwnd = difference_bytes_acked / CCV(ccv, mss_cache);
+
+		if (rollback_cwnd < CCV(ccv, snd_cwnd)) {
+			CCV(ccv, snd_cwnd) = max(TCP_INIT_CWND, CCV(ccv, snd_cwnd) - rollback_cwnd);
+		}
+	}
+
+	nreno->search_stop_search = 1;
+	CCV(ccv, snd_ssthresh) = CCV(ccv, snd_cwnd);
+}
+
+static uint64_t search_interpolate_delivered_bytes(struct cc_var* ccv, uint32_t rtt_us, uint32_t curr_index, uint32_t prev_index, uint64_t left_bytes, uint64_t right_bytes) {
+	struct newreno *nreno = ccv->cc_data;
+
+	uint32_t now_us = ticks * tick;
+	uint32_t time_left = 0, time_right = 0;
+	uint64_t interpoldated_delv_bytes = 0;
+	uint32_t proportion = 0;
+
+	time_right = nreno->search_bin_end_us - ((curr_index - prev_index) * nreno->search_bin_duration_us);
+	time_left = time_right - nreno->search_bin_duration_us;
+
+	// Check if time difference for interpolation is non-zero to avoid division by zero
+	if (right_bytes != left_bytes) {
+		// Perform interpolation
+		proportion = ((now_us - rtt_us) - time_left) / nreno->search_bin_duration_us;
+		interpoldated_delv_bytes = left_bytes + proportion * (right_bytes - left_bytes);
+	}
+
+	return interpoldated_delv_bytes;
+}
+
+static void search_update(struct cc_var* ccv) {
+	uint32_t rtt_us = ... ; // TODO: get unsmoothed rtt
+
+	struct newreno *nreno = ccv->cc_data;
+
+	uint64_t acked_bytes = 0;
+	uint32_t curr_index = 0;
+	int32_t prev_index = 0;
+	uint64_t curr_delv_bytes = 0, prev_delv_bytes = 0;
+	uint64_t prev_delv_bytes_under = 0, prev_delv_bytes_over = 0;
+	int32_t norm_diff = 0;
+	uint32_t now_us = ticks * tick; // current clock time in us
+
+	/* by receiving the first ack packet, initialize bin duration and bin end time */
+	if (nreno->search_bin_duration_us == 0) {
+		nreno->search_bin_duration_us = SEARCH_BIN_DURATION(rtt_us);
+		nreno->search_bin_end_us = now_us + nreno->search_bin_duration_us;
+	}
+
+	/* have we reached the bin boundary? */
+	if (now_us > nreno->search_bin_end_us) {
+		/* Check and update missed bins */
+		search_update_missed_bins(ccv);
+
+		/* update delivered bytes in bin */
+		acked_bytes = ccv->curack - nreno->search_prev_bytes_acked;
+		nreno->search_bin[nreno->search_bin_total % SEARCH_NUM_BINS] = acked_bytes;
+		nreno->search_prev_bytes_acked = ccv->curack;
+
+		/* calculate indices for the current window and previous window after shifting by current RTT */
+		curr_index = nreno->search_bin_total;
+		prev_index = nreno->search_bin_total - (rtt_us/nreno->search_bin_duration_us);
+
+		/* check if there is enough bins after shift for computing previous window */
+		if (prev_index >= SEARCH_W && SEARCH_NUM_BINS - (curr_index - prev_index) >= SEARCH_W) {
+			/* Calculate delivered bytes for the current and previous windows */
+			curr_delv_bytes = search_calculate_window_bytes(ccv, curr_index);
+			prev_delv_bytes_over = search_calculate_window_bytes(ccv, prev_index);
+			prev_delv_bytes_under = search_calculate_window_bytes(ccv, prev_index - 1);
+
+			if (do_intpld == 1) {
+				prev_delv_bytes = search_interpolate_delivered_bytes(ccv, rtt_us, curr_index, prev_index, prev_delv_bytes_under, prev_delv_bytes_over);
+			} else {
+				prev_delv_bytes = prev_delv_bytes_over;
+			}
+
+			if (prev_delv_bytes > 0) {
+				norm_diff = ((2 * prev_delv_bytes) - curr_delv_bytes) * 100 / (2 * prev_delv_bytes);
+				
+				/* check for exit condition */
+				if ((2* prev_delv_bytes) >= curr_delv_bytes && norm_diff >= SEARCH_THRESH) {
+					search_exit_slow_start(ccv, rtt_us);
+				}
+			}
+		}
+
+		/* update bin-related parameters for the next bin */
+		nreno->search_bin_end_us = nreno->search_bin_end_us + nreno->search_bin_duration_us;
+		nreno->search_bin_total++;
+		nreno->search_bin[nreno->search_bin_total % SEARCH_NUM_BINS] = 0;
+	}
+}
 
 static void
 newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
@@ -274,6 +438,8 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 				/* Disable use of CSS in the future except long idle  */
 				nreno->newreno_flags &= ~CC_NEWRENO_HYSTART_ENABLED;
 				newreno_log_hystart_event(ccv, nreno, 11, CCV(ccv, snd_ssthresh));
+			} else if (/* doing search */) {
+				nreno->search_stop_search = 1;
 			}
 			if (V_tcp_do_rfc3465) {
 				if (ccv->flags & CCF_ABC_SENTAWND)
@@ -352,9 +518,13 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 		/* ABC is on by default, so incr equals 0 frequently. */
 		if (incr > 0)
 			log(LOG_NOTICE, "Newreno slow start");
-			// <<<<<SEARCH IMPL>>>>> Slow start ack_arrival (not in ABC, so do SEARCH here)
-			CCV(ccv, snd_cwnd) = min(cw + incr,
-			    TCP_MAXWIN << CCV(ccv, snd_scale));
+		// <<<<<SEARCH IMPL>>>>> Slow start ack_arrival (not in ABC, so
+		// do SEARCH here)
+		if (/* doing search && */ !nreno->search_stop_search) {
+			search_update(ccv);
+		}
+		CCV(ccv, snd_cwnd) = min(cw + incr,
+		    TCP_MAXWIN << CCV(ccv, snd_scale));
 
 		log(LOG_INFO, "[now %d] [t_srtt %u] [curack %u]\n",
 			ticks * tick,

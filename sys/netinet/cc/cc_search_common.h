@@ -1,0 +1,13 @@
+#ifndef _CC_SEARCH_COMMON_H
+#define _CC_SEARCH_COMMON_H
+
+#define SEARCH_WINDOW_FACTOR 3.5
+#define SEARCH_W 10
+#define SEARCH_EXTRA_BINS 15
+#define SEARCH_NUM_BINS SEARCH_W + SEARCH_EXTRA_BINS
+#define SEARCH_THRESH 0.35
+
+#define SEARCH_WINDOW_SIZE(initial_rtt) initial_rtt * SEARCH_WINDOW_FACTOR
+#define SEARCH_BIN_DURATION(initial_rtt) SEARCH_WINDOW_SIZE(initial_rtt) / SEARCH_W
+
+#endif

@@ -34,6 +34,9 @@ struct newreno {
 	uint32_t beta;
 	uint32_t beta_ecn;
 	uint32_t newreno_flags;
+	// TODO: Extract HyStart and SEARCH parameters into a union once they are guaranteed mutually exclusive
+	// union {
+	// struct {
 	uint32_t css_baseline_minrtt;
 	uint32_t css_current_round_minrtt;
 	uint32_t css_lastround_minrtt;
@@ -43,14 +46,18 @@ struct newreno {
 	uint32_t css_fas_at_css_entry;
 	uint32_t css_lowrtt_fas;
 	uint32_t css_last_fas;
+	// } hystart;
 
+	// struct {
 	// <<<<<SEARCH>>>>>
-	uint32_t search_bin[SEARCH_NUM_BINS];	// Array to keep bytes for bins
 	uint32_t search_bin_duration_us;		// Duration of each bin in microseconds
-	uint32_t search_bin_total;				// Total number of bins
+	int32_t  search_curr_idx;				// Total number of bins
 	uint32_t search_bin_end_us;				// End time of the latest bin in microseconds
-	uint8_t  search_stop_search;			// The choke/exit point based on SEARCH is found
-	uint64_t search_prev_bytes_acked;		// Previous total bytes acked
+	uint16_t search_bin[SEARCH_TOTAL_BINS];	// Array to keep bytes for bins
+	// uint8_t search_unused;
+	uint8_t search_scale_factor;					// Scale factor to fit value within bin size
+	// } search;
+	// };
 };
 
 struct cc_newreno_opts {

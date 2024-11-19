@@ -57,6 +57,7 @@
 
 #include <sys/param.h>
 #include <sys/kernel.h>
+#include <sys/khelp.h>
 #include <sys/malloc.h>
 #include <sys/module.h>
 #include <sys/socket.h>
@@ -74,6 +75,7 @@
 #include <netinet/in_pcb.h>
 #include <netinet/in.h>
 #include <netinet/in_pcb.h>
+#include <netinet/khelp/h_ertt.h>
 #include <netinet/tcp.h>
 #include <netinet/tcp_seq.h>
 #include <netinet/tcp_var.h>
@@ -81,8 +83,11 @@
 #include <netinet/tcp_hpts.h>
 #include <netinet/cc/cc.h>
 #include <netinet/cc/cc_module.h>
-#include <netinet/cc/cc_newreno.h>
+#include <netinet/cc/cc_newreno_search.h>
 
+#include <sys/syslog.h>
+
+static int newreno_search_mod_init(void);
 static void	newreno_cb_destroy(struct cc_var *ccv);
 static void	newreno_ack_received(struct cc_var *ccv, ccsignal_t type);
 static void	newreno_after_idle(struct cc_var *ccv);
@@ -99,8 +104,9 @@ VNET_DECLARE(uint32_t, newreno_beta);
 VNET_DECLARE(uint32_t, newreno_beta_ecn);
 #define V_newreno_beta_ecn VNET(newreno_beta_ecn)
 
-struct cc_algo newreno_cc_algo = {
-	.name = "newreno",
+struct cc_algo newreno_search_cc_algo = {
+	.name = "newreno_search",
+	.mod_init = newreno_search_mod_init,
 	.cb_destroy = newreno_cb_destroy,
 	.ack_received = newreno_ack_received,
 	.after_idle = newreno_after_idle,
@@ -112,6 +118,20 @@ struct cc_algo newreno_cc_algo = {
 	.cb_init = newreno_cb_init,
 	.cc_data_sz = newreno_data_sz,
 };
+
+static int ertt_id;
+
+static int newreno_search_mod_init(void) {
+	ertt_id = khelp_get_id("ertt");
+	if (ertt_id <= 0) {
+		printf("%s: h_ertt module not found\n", __func__);
+		return (ENOENT); // TODO: Is this the most apt error code? In Linux, Linus would vehemently disagree
+	}
+	return (0);
+}
+
+// <<<<<SEARCH IMPL>>>>> note: no conn_init defined
+// <<<<<SEARCH IMPL>>>>> note: no ssthresh_update or related (ssthresh is updated in 7 placed in this file)
 
 static void
 newreno_log_hystart_event(struct cc_var *ccv, struct newreno *nreno, uint8_t mod, uint32_t flex1)
@@ -170,9 +190,12 @@ newreno_data_sz(void)
 	return (sizeof(struct newreno));
 }
 
+// <<<<<SEARCH IMPL>>>>> Reset search
+
 static int
 newreno_cb_init(struct cc_var *ccv, void *ptr)
 {
+	log(LOG_NOTICE, "Init CB");
 	struct newreno *nreno;
 
 	INP_WLOCK_ASSERT(tptoinpcb(ccv->tp));
@@ -202,14 +225,26 @@ newreno_cb_init(struct cc_var *ccv, void *ptr)
 	nreno->css_fas_at_css_entry = 0;
 	nreno->css_lowrtt_fas = 0;
 	nreno->css_last_fas = 0;
+
+	// <<<<<SEARCH IMPL>>>>> Initialize variables here
+	// reset_search
+
 	return (0);
 }
 
 static void
 newreno_cb_destroy(struct cc_var *ccv)
 {
+	log(LOG_NOTICE, "Destroy CB");
 	free(ccv->cc_data, M_CC_MEM);
 }
+
+static uint32_t get_rtt_us(struct cc_var* ccv) {
+	struct ertt* e_t = khelp_get_osd(&CCV(ccv, t_osd), ertt_id);
+	return e_t->rtt;
+}
+
+// <<<<<SEARCH IMPL>>>>> SEARCH update
 
 static void
 newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
@@ -255,12 +290,15 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 				 * We have slipped into CA with
 				 * CSS active. Deactivate all.
 				 */
+				log(LOG_NOTICE, "Exiting Hystart++ CSS\n");
 				/* Turn off the CSS flag */
 				nreno->newreno_flags &= ~CC_NEWRENO_HYSTART_IN_CSS;
 				/* Disable use of CSS in the future except long idle  */
 				nreno->newreno_flags &= ~CC_NEWRENO_HYSTART_ENABLED;
 				newreno_log_hystart_event(ccv, nreno, 11, CCV(ccv, snd_ssthresh));
 			}
+			// (else?) if doing search
+			// then stop search
 			if (V_tcp_do_rfc3465) {
 				if (ccv->flags & CCF_ABC_SENTAWND)
 					ccv->flags &= ~CCF_ABC_SENTAWND;
@@ -336,15 +374,28 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 			}
 		}
 		/* ABC is on by default, so incr equals 0 frequently. */
-		if (incr > 0)
+		if (incr > 0) {
+			log(LOG_NOTICE, "Newreno slow start");
 			CCV(ccv, snd_cwnd) = min(cw + incr,
 			    TCP_MAXWIN << CCV(ccv, snd_scale));
+		}
+
+		// if doing search and not stopped
+		// update search
+
+		log(LOG_INFO, "[now %d] [t_srtt %u] [curack %u]\n",
+			ticks * tick,
+			CCV(ccv, t_srtt),
+			ccv->curack
+		);
+
 	}
 }
 
 static void
 newreno_after_idle(struct cc_var *ccv)
 {
+	log(LOG_NOTICE, "After idle\n");
 	struct newreno *nreno;
 
 	nreno = ccv->cc_data;
@@ -356,7 +407,8 @@ newreno_after_idle(struct cc_var *ccv)
 		nreno->newreno_flags &= ~CC_NEWRENO_HYSTART_IN_CSS;
 		nreno->newreno_flags |= CC_NEWRENO_HYSTART_ENABLED;
 		newreno_log_hystart_event(ccv, nreno, 12, CCV(ccv, snd_ssthresh));
-	}
+	} // else if doing search
+	// then unstop search
 }
 
 /*
@@ -410,6 +462,7 @@ newreno_cong_signal(struct cc_var *ccv, ccsignal_t type)
 			}
 			if (!IN_CONGRECOVERY(CCV(ccv, t_flags)))
 				CCV(ccv, snd_ssthresh) = cwin;
+			log(LOG_INFO, "Entering recovery, dup ack threshold reached\n");
 			ENTER_RECOVERY(CCV(ccv, t_flags));
 		}
 		break;
@@ -423,6 +476,7 @@ newreno_cong_signal(struct cc_var *ccv, ccsignal_t type)
 		if (!IN_CONGRECOVERY(CCV(ccv, t_flags))) {
 			CCV(ccv, snd_ssthresh) = cwin;
 			CCV(ccv, snd_cwnd) = cwin;
+			log(LOG_INFO, "Entering recovery, ECN received\n");
 			ENTER_CONGRECOVERY(CCV(ccv, t_flags));
 		}
 		break;
@@ -456,7 +510,7 @@ newreno_ctl_output(struct cc_var *ccv, struct sockopt *sopt, void *buf)
 	if (sopt->sopt_valsize != sizeof(struct cc_newreno_opts))
 		return (EMSGSIZE);
 
-	if (CC_ALGO(ccv->tp) != &newreno_cc_algo)
+	if (CC_ALGO(ccv->tp) != &newreno_search_cc_algo)
 		return (ENOPROTOOPT);
 
 	nreno = (struct newreno *)ccv->cc_data;
@@ -604,5 +658,5 @@ SYSCTL_PROC(_net_inet_tcp_cc_newreno, OID_AUTO, beta_ecn,
     &VNET_NAME(newreno_beta_ecn), 3, &newreno_beta_handler, "IU",
     "New Reno beta ecn, specified as number between 1 and 100");
 
-DECLARE_CC_MODULE(newreno, &newreno_cc_algo);
+DECLARE_CC_MODULE(newreno, &newreno_search_cc_algo);
 MODULE_VERSION(newreno, 2);

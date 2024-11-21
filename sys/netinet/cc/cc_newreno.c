@@ -94,7 +94,7 @@ static void	newreno_rttsample(struct cc_var *ccv, uint32_t usec_rtt, uint32_t rx
 static 	int	newreno_cb_init(struct cc_var *ccv, void *);
 static size_t	newreno_data_sz(void);
 
-uint32_t hystart_enable = 1;
+uint32_t slowstart_mode = 1; // 0 - Slow start only, 1 - Hystart++, 2 - SEARCH
 
 VNET_DECLARE(uint32_t, newreno_beta);
 #define V_newreno_beta VNET(newreno_beta)
@@ -193,7 +193,7 @@ newreno_cb_init(struct cc_var *ccv, void *ptr)
 	 * the socket option gets strobed and
 	 * we have not hit a loss
 	 */
-	if (hystart_enable) {
+	if (slowstart_mode == 1) {
 		nreno->newreno_flags = CC_NEWRENO_HYSTART_ENABLED;
 	} else {
 		nreno->newreno_flags = 0;
@@ -362,7 +362,7 @@ newreno_after_idle(struct cc_var *ccv)
 		 */
 		nreno->newreno_flags &= ~CC_NEWRENO_HYSTART_IN_CSS;
 
-		if (hystart_enable) {
+		if (slowstart_mode == 1) {
 			nreno->newreno_flags |= CC_NEWRENO_HYSTART_ENABLED;
 			newreno_log_hystart_event(ccv, nreno, 12, CCV(ccv, snd_ssthresh));
 		}
@@ -604,10 +604,10 @@ SYSCTL_NODE(_net_inet_tcp_cc, OID_AUTO, newreno,
     CTLFLAG_RW | CTLFLAG_MPSAFE, NULL,
     "New Reno related settings");
 
-SYSCTL_UINT(_net_inet_tcp_cc_newreno, OID_AUTO, hystart_enable,
+SYSCTL_UINT(_net_inet_tcp_cc_newreno, OID_AUTO, slowstart_mode,
 	CTLFLAG_RW,
-	&hystart_enable, 1,
-	"Is HyStart++ enabled");
+	&slowstart_mode, 1,
+	"Algorithm to use for slow start phase: 0 - Slow start only, 1 - Hystart++, 2 - SEARCH");
 
 SYSCTL_PROC(_net_inet_tcp_cc_newreno, OID_AUTO, beta,
     CTLFLAG_VNET | CTLTYPE_UINT | CTLFLAG_RW | CTLFLAG_NEEDGIANT,

@@ -73,7 +73,6 @@ SYSCTL_DECL(_net_inet_tcp_cc);
 #endif
 
 /* For CC modules that use hystart++ */
-extern uint32_t hystart_enable; // Is Hystart++ enabled
 extern uint32_t hystart_lowcwnd;
 extern uint32_t hystart_minrtt_thresh;
 extern uint32_t hystart_maxrtt_thresh;

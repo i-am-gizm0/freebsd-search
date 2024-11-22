@@ -56,4 +56,8 @@ struct cc_newreno_opts {
 #define CC_NEWRENO_HYSTART_ENABLED	0x0002	/* We can do hystart, a loss removes this flag */
 #define CC_NEWRENO_HYSTART_IN_CSS	0x0004	/* If we enter hystart CSS this flag is set */
 #define CC_NEWRENO_BETA_ECN_ENABLED	0x0020
+
+#define SS_SLOWSTART 0
+#define SS_HYSTART 1
+#define SS_SEARCH 2
 #endif /* _CC_NEWRENO_H */

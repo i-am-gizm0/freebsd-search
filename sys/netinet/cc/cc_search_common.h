@@ -3,6 +3,8 @@
 
 #define MAX_SEARCH_BIN_VALUE 0xFFFF
 
+typedef uint16_t search_bin_t;
+
 /**
  * Window size, in tenths of an RTT (35 = 3.5*InitRTT)
  */
@@ -14,6 +16,10 @@
  * Slow start exit threshold, in percent
  */
 #define SEARCH_THRESH 35
+/** How many bits to shift each iteration trying to fit sequence number in a bin */
+#define SEARCH_SCALE_SHIFT_STEP 1
+/** Force a reset after missing this number of bins */
+#define SEARCH_MISSED_BIN_COUNT_TRIGGER_RESET 3
 /**
  * Enable cwnd rollback (on exit, reduce cwnd to its value 2 InitRTT ago, to avoid congestion)
  */

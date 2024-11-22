@@ -270,7 +270,7 @@ static void search_update_bins(struct cc_var* ccv, uint32_t now_us, uint32_t rtt
 	uint32_t passed_bins = ((now_us - nreno->search_bin_end_us) / nreno->search_bin_duration_us) + 1;
 
 	// if (passed_bins >= SEARCH_TOTAL_BINS) {
-	if (passed_bins >= 3) {
+	if (passed_bins >= SEARCH_MISSED_BIN_COUNT_TRIGGER_RESET) {
 		search_reset(nreno);
 		search_init_bins(ccv, rtt_us, now_us);
 		return;
@@ -298,8 +298,8 @@ static void search_update_bins(struct cc_var* ccv, uint32_t now_us, uint32_t rtt
 		uint8_t shift_amount = 0;
 		// Update scale factor if bin_value is too big to be represented
 		while (bin_value > MAX_SEARCH_BIN_VALUE) {
-			shift_amount++;
-			bin_value >>= 1; // Divide bin_value by 2 (shift right 1 bit)
+			shift_amount += SEARCH_SCALE_SHIFT_STEP;
+			bin_value >>= SEARCH_SCALE_SHIFT_STEP; // Divide bin_value by 2 (shift right 1 bit)
 		}
 
 		// Scale all previous bins according to the new shift_amount
@@ -312,13 +312,14 @@ static void search_update_bins(struct cc_var* ccv, uint32_t now_us, uint32_t rtt
 	}
 	
 	// Assign bin value to current bin
-	SEARCH_BIN(ccv, nreno->search_curr_idx) = bin_value;
+	SEARCH_BIN(ccv, nreno->search_curr_idx) = (search_bin_t)bin_value;
 }
 
 /**
  * Calculates the bytes delivered when we want to look at some time boundaries in the middle of bins
  */
 static uint64_t search_compute_delivered_window(struct cc_var* ccv, int32_t index1, int32_t index2, uint32_t fraction) {
+	// TODO: Does this need 64 bits?
 	// How many bytes were delivered between these bins
 	uint64_t delivered = SEARCH_BIN(ccv, index2 - 1) - SEARCH_BIN(ccv, index1);
 

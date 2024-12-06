@@ -384,11 +384,13 @@ static void search_exit_slow_start(struct cc_var* ccv, uint32_t now_us, uint32_t
 		}
 	 }
 
-	 CCV(ccv, snd_ssthresh) = CCV(ccv, snd_cwnd);
+	log(LOG_NOTICE, "SEARCH: Exit slow start with ssthresh = %u", CCV(ccv, snd_cwnd));
+	//  CCV(ccv, snd_ssthresh) = CCV(ccv, snd_cwnd);
 }
 
 // <<<<<SEARCH IMPL>>>>> SEARCH update
 static void search_update(struct cc_var* ccv) {
+	log(LOG_NOTICE, "SEARCH update");
 	struct newreno* nreno = ccv->cc_data;
 
 	int32_t prev_idx = 0;
@@ -406,6 +408,7 @@ static void search_update(struct cc_var* ccv) {
 
 	// If we have reached the bin boundary,
 	if (now_us > nreno->search_bin_end_us) {
+		log(LOG_NOTICE, "SEARCH bin boundary");
 		search_update_bins(ccv, now_us, rtt_us);
 
 		// Are there enough bins to compute previous window?
@@ -435,6 +438,20 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 	struct newreno *nreno;
 
 	nreno = ccv->cc_data;
+	uint32_t rtt_us = get_rtt_us(ccv);
+	int32_t prev_idx = nreno->search_curr_idx - (rtt_us / nreno->search_bin_duration_us);
+	uint64_t curr_delv_bytes = search_compute_delivered_window(ccv, nreno->search_curr_idx - SEARCH_BINS, nreno->search_curr_idx, 0);	// Bytes delivered in the current rolling RTT
+	uint64_t prev_delv_bytes = search_compute_delivered_window(ccv, prev_idx - SEARCH_BINS, prev_idx, ((rtt_us % nreno->search_bin_duration_us) * 100 / nreno -> search_bin_duration_us));	// Bytes delivered in the previous rolling RTT
+	int32_t norm_diff = ((2 * prev_delv_bytes) - curr_delv_bytes) * 100 / (2 * prev_delv_bytes);
+	log(LOG_INFO, "SEARCH ACK: [now %d] [h_ertt %u] [curack %u] [curr_idx %u] [curbytes %lu] [2xprevdelv %lu] [normdiff %d]\n",
+		ticks * tick,
+		rtt_us,
+		ccv->curack,
+		nreno->search_curr_idx,
+		curr_delv_bytes,
+		prev_delv_bytes,
+		norm_diff
+	);
 	if (type == CC_ACK && !IN_RECOVERY(CCV(ccv, t_flags)) &&
 	    (ccv->flags & CCF_CWND_LIMITED)) {
 		u_int cw = CCV(ccv, snd_cwnd);
@@ -566,12 +583,6 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 			CCV(ccv, snd_cwnd) = min(cw + incr,
 			    TCP_MAXWIN << CCV(ccv, snd_scale));
 
-		log(LOG_INFO, "[now %d] [t_srtt %u] [curack %u]\n",
-			ticks * tick,
-			CCV(ccv, t_srtt),
-			ccv->curack
-		);
-
 	}
 }
 
@@ -641,12 +652,15 @@ newreno_cong_signal(struct cc_var *ccv, ccsignal_t type)
 		if (!IN_FASTRECOVERY(CCV(ccv, t_flags))) {
 			if (IN_CONGRECOVERY(CCV(ccv, t_flags) &&
 			    V_cc_do_abe && V_cc_abe_frlossreduce)) {
+				log(LOG_NOTICE, "NewReno Cong signal: dup ack in cong recovery. setting ssthresh");
 				CCV(ccv, snd_ssthresh) =
 				    ((uint64_t)CCV(ccv, snd_ssthresh) *
 				     (uint64_t)beta) / (uint64_t)beta_ecn; // SET SSTHRESH
 			}
-			if (!IN_CONGRECOVERY(CCV(ccv, t_flags)))
+			if (!IN_CONGRECOVERY(CCV(ccv, t_flags))) {
+				log(LOG_NOTICE, "NewReno Cong signal: dup ack not in cong recovery. setting ssthresh");
 				CCV(ccv, snd_ssthresh) = cwin; // SET SSTHRESH
+			}
 			log(LOG_INFO, "Entering recovery, dup ack threshold reached\n");
 			ENTER_RECOVERY(CCV(ccv, t_flags));
 		}
@@ -660,6 +674,7 @@ newreno_cong_signal(struct cc_var *ccv, ccsignal_t type)
 		}
 		// TODO: search_reset?
 		if (!IN_CONGRECOVERY(CCV(ccv, t_flags))) {
+			log(LOG_NOTICE, "NewReno Cong signal: ECN. setting ssthresh");
 			CCV(ccv, snd_ssthresh) = cwin; // SET SSTHRESH
 			CCV(ccv, snd_cwnd) = cwin;
 			log(LOG_INFO, "Entering recovery, ECN received\n");
@@ -675,6 +690,7 @@ newreno_cong_signal(struct cc_var *ccv, ccsignal_t type)
 					CCV(ccv, snd_fack) +
 					CCV(ccv, sackhint.sack_bytes_rexmit);
 			}
+			log(LOG_NOTICE, "NewReno Cong signal: RTO. setting ssthresh");
 			CCV(ccv, snd_ssthresh) = max(2,
 				((uint64_t)min(CCV(ccv, snd_wnd), pipe) *
 				    (uint64_t)factor) /
@@ -776,13 +792,16 @@ newreno_newround(struct cc_var *ccv, uint32_t round_cnt)
 			 * and give us hystart_css_rounds more rounds.
 			 */
 			if (ccv->flags & CCF_HYSTART_CONS_SSTH) {
+				log(LOG_NOTICE, "NewReno Hystart++: SS->CSS (CA). Setting ssthresh (true)");
 				CCV(ccv, snd_ssthresh) = ((nreno->css_lowrtt_fas + nreno->css_fas_at_css_entry) / 2); // SET SSTHRESH
 			} else {
+				log(LOG_NOTICE, "NewReno Hystart++: SS->CSS (CA). Setting ssthresh (false)");
 				CCV(ccv, snd_ssthresh) = nreno->css_lowrtt_fas; // SET SSTHRESH
 			}
 			CCV(ccv, snd_cwnd) = nreno->css_fas_at_css_entry;
 			nreno->css_entered_at_round = round_cnt;
 		} else {
+			log(LOG_NOTICE, "NewReno Hystart++: SS->CA. Setting ssthresh to cwnd");
 			CCV(ccv, snd_ssthresh) = CCV(ccv, snd_cwnd); // SET SSTHRESH
 			/* Turn off the CSS flag */
 			nreno->newreno_flags &= ~CC_NEWRENO_HYSTART_IN_CSS;

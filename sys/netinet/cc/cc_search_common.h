@@ -11,7 +11,7 @@ typedef uint16_t search_bin_t;
 #define SEARCH_WINDOW_SIZE_TIME 35
 #define SEARCH_BINS 10
 #define SEARCH_EXTRA_BINS 15
-#define SEARCH_TOTAL_BINS SEARCH_BINS + SEARCH_EXTRA_BINS
+#define SEARCH_TOTAL_BINS (SEARCH_BINS + SEARCH_EXTRA_BINS)
 /**
  * Slow start exit threshold, in percent
  */

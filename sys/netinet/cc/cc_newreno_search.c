@@ -442,8 +442,8 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 	uint64_t curr_delv_bytes = search_compute_delivered_window(ccv, nreno->search_curr_idx - SEARCH_BINS, nreno->search_curr_idx, 0);	// Bytes delivered in the current rolling RTT
 	uint64_t prev_delv_bytes = nreno->search_bin_duration_us == 0 ? -1 : search_compute_delivered_window(ccv, prev_idx - SEARCH_BINS, prev_idx, ((rtt_us % nreno->search_bin_duration_us) * 100 / nreno -> search_bin_duration_us));	// Bytes delivered in the previous rolling RTT
 	int32_t norm_diff = prev_delv_bytes == 0 ? -1 : ((2 * prev_delv_bytes) - curr_delv_bytes) * 100 / (2 * prev_delv_bytes);
-	log(LOG_INFO, "SEARCH ACK: [now %d] [h_ertt %u] [curack %u] [curr_idx %u] [curbytes %lu] [2xprevdelv %lu] [normdiff %d] [cwnd %u] [ssthresh %u]\n",
-		ticks * tick,
+	log(LOG_INFO, "SEARCH ACK: [now %ld] [h_ertt %u] [curack %u] [curr_idx %d] [curbytes %lu] [2xprevdelv %lu] [normdiff %d] [cwnd %u] [ssthresh %u]\n",
+		(long)(ticks * tick),
 		rtt_us,
 		ccv->curack,
 		nreno->search_curr_idx,

@@ -19,7 +19,7 @@ typedef uint16_t search_bin_t;
 /** How many bits to shift each iteration trying to fit sequence number in a bin */
 #define SEARCH_SCALE_SHIFT_STEP 1
 /** Force a reset after missing this number of bins */
-#define SEARCH_MISSED_BIN_COUNT_TRIGGER_RESET 3
+#define SEARCH_MISSED_BIN_RESET_THRESHOLD 2
 /**
  * Enable cwnd rollback (on exit, reduce cwnd to its value 2 InitRTT ago, to avoid congestion)
  */

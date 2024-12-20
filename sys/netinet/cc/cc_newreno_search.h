@@ -52,7 +52,7 @@ struct newreno {
 	// <<<<<SEARCH>>>>>
 	uint32_t search_bin_duration_us;		// Duration of each bin in microseconds
 	int32_t  search_curr_idx;				// Total number of bins
-	uint32_t search_bin_end_us;				// End time of the latest bin in microseconds
+	uint64_t search_bin_end_us;				// End time of the latest bin in microseconds
 	search_bin_t search_bin[SEARCH_TOTAL_BINS];	// Array to keep bytes for bins
 	// uint8_t search_unused;
 	uint8_t search_scale_factor;					// Scale factor to fit value within bin size

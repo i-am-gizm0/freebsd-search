@@ -85,6 +85,8 @@
 #include <netinet/cc/cc_module.h>
 #include <netinet/cc/cc_newreno_search.h>
 #include <netinet/cc/cc_search_common.h>
+#include <stdint.h>
+#include "sys/time.h"
 
 #include <sys/syslog.h>
 
@@ -248,6 +250,12 @@ newreno_cb_destroy(struct cc_var *ccv)
 	free(ccv->cc_data, M_CC_MEM);
 }
 
+static uint64_t get_now_us(void) {
+	static struct timeval tv;
+	microtime(&tv);
+	return (tv.tv_sec * 1000000) + tv.tv_usec;
+}
+
 static uint32_t get_rtt_us(struct cc_var* ccv) {
 	struct ertt* e_t = khelp_get_osd(&CCV(ccv, t_osd), ertt_id);
 	return (e_t->rtt);
@@ -378,8 +386,10 @@ static void search_exit_slow_start(struct cc_var* ccv, uint32_t now_us, uint32_t
 		 * or is not larger than the current cwnd (in case of TCP reset)
 		 */
 		if (overshoot_cwnd < CCV(ccv, snd_cwnd)) {
+			log(LOG_NOTICE, "cwnd: setting for search rollback");
 			CCV(ccv, snd_cwnd) = max(CCV(ccv, snd_cwnd) - overshoot_cwnd, V_tcp_initcwnd_segments);
 		} else {
+			log(LOG_NOTICE, "cwnd: search rollback resetting to initial");
 			CCV(ccv, snd_cwnd) = V_tcp_initcwnd_segments;
 		}
 	 }
@@ -397,9 +407,9 @@ static void search_update(struct cc_var* ccv) {
 	uint64_t curr_delv_bytes = 0;	// Bytes delivered in the current rolling RTT
 	uint64_t prev_delv_bytes = 0;	// Bytes delivered in the previous rolling RTT
 	int32_t norm_diff = 0; 			// Ratio of expected/actual delivered bytes in the current rolling RTT
-	uint32_t now_us = ticks * tick;
+	uint64_t now_us = get_now_us();
 	uint32_t rtt_us = get_rtt_us(ccv);
-	uint32_t fraction = 0; // TODO: ?
+	uint32_t fraction = 0; // Interpolate sliding bin values that might not exactly line up with bins
 
 	// On first ack, initialize bin duration and bin end time
 	if (nreno->search_bin_duration_us == 0) {
@@ -432,6 +442,9 @@ static void search_update(struct cc_var* ccv) {
 	}
 }
 
+MALLOC_DECLARE(M_BIN_DBG);
+MALLOC_DEFINE(M_BIN_DBG, "searchbindbg", "Buffer to print SEARCH bin debug info");
+
 static void
 newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 {
@@ -441,10 +454,10 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 	uint32_t rtt_us = get_rtt_us(ccv);
 	int32_t prev_idx = nreno->search_bin_duration_us == 0 ? -1 : nreno->search_curr_idx - (rtt_us / nreno->search_bin_duration_us);
 	uint64_t curr_delv_bytes = search_compute_delivered_window(ccv, nreno->search_curr_idx - SEARCH_BINS, nreno->search_curr_idx, 0);	// Bytes delivered in the current rolling RTT
-	uint64_t prev_delv_bytes = nreno->search_bin_duration_us == 0 ? -1 : search_compute_delivered_window(ccv, prev_idx - SEARCH_BINS, prev_idx, ((rtt_us % nreno->search_bin_duration_us) * 100 / nreno -> search_bin_duration_us));	// Bytes delivered in the previous rolling RTT
-	int32_t norm_diff = prev_delv_bytes == 0 ? -1 : ((2 * prev_delv_bytes) - curr_delv_bytes) * 100 / (2 * prev_delv_bytes);
-	log(LOG_INFO, "SEARCH ACK: [now %ld] [h_ertt %u] [curack %u] [curr_idx %d] [curbytes %lu] [2xprevdelv %lu] [normdiff %d] [cwnd %u] [ssthresh %u]\n",
-		(long)(ticks * tick),
+	int64_t prev_delv_bytes = nreno->search_bin_duration_us == 0 ? -1 : search_compute_delivered_window(ccv, prev_idx - SEARCH_BINS, prev_idx, ((rtt_us % nreno->search_bin_duration_us) * 100 / nreno -> search_bin_duration_us));	// Bytes delivered in the previous rolling RTT
+	int32_t norm_diff = prev_delv_bytes <= 0 ? -1 : ((2 * prev_delv_bytes) - curr_delv_bytes) * 100 / (2 * prev_delv_bytes);
+	log(LOG_INFO, "SEARCH ACK: [now %lu] [h_ertt %u] [curack %u] [curr_idx %d] [curbytes %lu] [2xprevdelv %ld] [normdiff %d] [cwnd %u] [ssthresh %u]\n",
+		get_now_us(),
 		rtt_us,
 		ccv->curack,
 		nreno->search_curr_idx,
@@ -454,6 +467,42 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 		CCV(ccv, snd_cwnd),
 		CCV(ccv, snd_ssthresh)
 	);
+	char* bin_dbg_buf = malloc(512 * sizeof(char), M_BIN_DBG, M_NOWAIT);
+	if (bin_dbg_buf == NULL) {
+		panic("Could not allocate memory for bin debug buffer");
+	}
+	snprintf(
+		bin_dbg_buf,
+		512,
+		"%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t",
+		nreno->search_bin[0],
+		nreno->search_bin[1],
+		nreno->search_bin[2],
+		nreno->search_bin[3],
+		nreno->search_bin[4],
+		nreno->search_bin[5],
+		nreno->search_bin[6],
+		nreno->search_bin[7],
+		nreno->search_bin[8],
+		nreno->search_bin[9],
+		nreno->search_bin[10],
+		nreno->search_bin[11],
+		nreno->search_bin[12],
+		nreno->search_bin[13],
+		nreno->search_bin[14],
+		nreno->search_bin[15],
+		nreno->search_bin[16],
+		nreno->search_bin[17],
+		nreno->search_bin[18],
+		nreno->search_bin[19],
+		nreno->search_bin[20],
+		nreno->search_bin[21],
+		nreno->search_bin[22],
+		nreno->search_bin[23],
+		nreno->search_bin[24]);
+	log(LOG_NOTICE, "SEARCH bin dbg: %s", bin_dbg_buf);
+	free(bin_dbg_buf, M_BIN_DBG);
+
 	if (type == CC_ACK && !IN_RECOVERY(CCV(ccv, t_flags)) &&
 	    (ccv->flags & CCF_CWND_LIMITED)) {
 		u_int cw = CCV(ccv, snd_cwnd);
@@ -581,9 +630,11 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 			search_update(ccv);
 		}
 		/* ABC is on by default, so incr equals 0 frequently. */
-		if (incr > 0)
+		if (incr > 0) {
+			log(LOG_NOTICE, "cwnd: increasing in cwnd_limited (slow start)");
 			CCV(ccv, snd_cwnd) = min(cw + incr,
 			    TCP_MAXWIN << CCV(ccv, snd_scale));
+		}
 
 	}
 }
@@ -678,6 +729,7 @@ newreno_cong_signal(struct cc_var *ccv, ccsignal_t type)
 		if (!IN_CONGRECOVERY(CCV(ccv, t_flags))) {
 			log(LOG_NOTICE, "NewReno Cong signal: ECN. setting ssthresh\n");
 			CCV(ccv, snd_ssthresh) = cwin; // SET SSTHRESH
+			log(LOG_NOTICE, "cwnd: cong sig ECN: setting to cwin");
 			CCV(ccv, snd_cwnd) = cwin;
 			log(LOG_INFO, "Entering recovery, ECN received\n");
 			ENTER_CONGRECOVERY(CCV(ccv, t_flags));
@@ -698,6 +750,7 @@ newreno_cong_signal(struct cc_var *ccv, ccsignal_t type)
 				    (uint64_t)factor) /
 				    (100ULL * (uint64_t)mss)) * mss; // SET SSTHRESH
 		}
+		log(LOG_NOTICE, "cwnd: cong sig RTO - setting to MSS");
 		CCV(ccv, snd_cwnd) = mss;
 		break;
 	default:
@@ -800,6 +853,7 @@ newreno_newround(struct cc_var *ccv, uint32_t round_cnt)
 				log(LOG_NOTICE, "NewReno Hystart++: SS->CSS (CA). Setting ssthresh (false)\n");
 				CCV(ccv, snd_ssthresh) = nreno->css_lowrtt_fas; // SET SSTHRESH
 			}
+			log(LOG_NOTICE, "cwnd: newreno setting in css");
 			CCV(ccv, snd_cwnd) = nreno->css_fas_at_css_entry;
 			nreno->css_entered_at_round = round_cnt;
 		} else {

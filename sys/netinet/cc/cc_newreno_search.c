@@ -85,7 +85,6 @@
 #include <netinet/cc/cc_module.h>
 #include <netinet/cc/cc_newreno_search.h>
 #include <netinet/cc/cc_search_common.h>
-#include <stdint.h>
 #include "sys/time.h"
 
 #include <sys/syslog.h>
@@ -303,7 +302,7 @@ static void search_init_bins(struct cc_var* ccv, uint64_t now_us, uint32_t rtt_u
 	SEARCH_BIN(ccv, 0) = bin_value;
 }
 
-static void search_update_bins(struct cc_var* ccv, uint32_t now_us, uint32_t rtt_us) {
+static int search_update_bins(struct cc_var* ccv, uint32_t now_us, uint32_t rtt_us) {
 	struct newreno* nreno = ccv->cc_data;
 
 	// passed_bins > 1 means we missed some bins
@@ -312,8 +311,8 @@ static void search_update_bins(struct cc_var* ccv, uint32_t now_us, uint32_t rtt
 	/* If we passed more than SEARCH_MISSED_BIN_RESET_THRESHOLD bins, need to reset SEARCH, and initialize bins*/
 	if (passed_bins > SEARCH_MISSED_BIN_RESET_THRESHOLD) {
 		search_reset(nreno);
-		search_init_bins(ccv, rtt_us, now_us);
-		return;
+		search_init_bins(ccv, now_us, rtt_us);
+		return 1;
 	}
 	for (uint32_t i = nreno->search_curr_idx + 1; i < nreno->search_curr_idx + passed_bins; i++) {
 		SEARCH_BIN(ccv, i) = SEARCH_BIN(ccv, nreno->search_curr_idx);
@@ -332,6 +331,7 @@ static void search_update_bins(struct cc_var* ccv, uint32_t now_us, uint32_t rtt
 	
 	// Assign bin value to current bin
 	SEARCH_BIN(ccv, nreno->search_curr_idx) = (search_bin_t)bin_value;
+	return 0;
 }
 
 /**
@@ -431,7 +431,9 @@ static void search_update(struct cc_var* ccv) {
 	// If we have reached the bin boundary,
 	if (now_us > nreno->search_bin_end_us) {
 		log(LOG_NOTICE, "SEARCH bin boundary\n");
-		search_update_bins(ccv, now_us, rtt_us);
+		if (search_update_bins(ccv, now_us, rtt_us)) {
+			return;
+		}
 
 		// Are there enough bins to compute previous window?
 		prev_idx = nreno->search_curr_idx - (rtt_us / nreno->search_bin_duration_us);

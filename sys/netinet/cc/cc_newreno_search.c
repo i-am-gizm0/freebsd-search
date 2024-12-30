@@ -200,6 +200,7 @@ static void search_reset(struct newreno* nreno) {
 	nreno->search_curr_idx = -1;
 	nreno->search_bin_end_us = 0;
 	nreno->search_scale_factor = 0;
+	nreno->search_bytes_this_bin = 0;
 }
 
 static int
@@ -293,13 +294,14 @@ static void search_init_bins(struct cc_var* ccv, uint64_t now_us, uint32_t rtt_u
 	nreno->search_bin_duration_us = (rtt_us * SEARCH_WINDOW_SIZE_TIME) / (SEARCH_BINS * 10);
 	nreno->search_bin_end_us = now_us + nreno->search_bin_duration_us;
 	nreno->search_curr_idx = 0;
+	nreno->search_bytes_this_bin = 0;
 
-	uint64_t bin_value = ccv->curack;
-	if (bin_value > MAX_SEARCH_BIN_VALUE) {
-		uint8_t amount_scaled = search_rescale_bins(ccv, bin_value);
-		bin_value >>= amount_scaled;
-	}
-	SEARCH_BIN(ccv, 0) = bin_value;
+	uint64_t bin_value = 0; // Set to 0 because bytes_acked isn't tracked for connections
+	// if (bin_value > MAX_SEARCH_BIN_VALUE) {
+	// 	uint8_t amount_scaled = search_rescale_bins(ccv, bin_value);
+	// 	bin_value >>= amount_scaled;
+	// }
+	SEARCH_BIN(ccv, 0) = bin_value; // TODO: Check if bin value of 0 messes anything up
 }
 
 static int search_update_bins(struct cc_var* ccv, uint32_t now_us, uint32_t rtt_us) {
@@ -318,11 +320,12 @@ static int search_update_bins(struct cc_var* ccv, uint32_t now_us, uint32_t rtt_
 		SEARCH_BIN(ccv, i) = SEARCH_BIN(ccv, nreno->search_curr_idx);
 	}
 
+	// Calculate bin_value by dividing bytes_acked by 2^scale_factor
+	uint64_t bin_value = SEARCH_BIN(ccv, nreno->search_curr_idx) + (nreno->search_bytes_this_bin >> nreno->search_scale_factor);
+
 	nreno->search_bin_end_us += passed_bins * nreno->search_bin_duration_us;
 	nreno->search_curr_idx += passed_bins;
-
-	// Calculate bin_value by dividing bytes_acked by 2^scale_factor
-	uint64_t bin_value = ccv->curack >> nreno->search_scale_factor; // TODO: confirm `curack` is the right thing
+	nreno->search_bytes_this_bin = 0;
 
 	if (bin_value > MAX_SEARCH_BIN_VALUE) {
 		uint8_t amount_scaled = search_rescale_bins(ccv, bin_value);
@@ -422,6 +425,8 @@ static void search_update(struct cc_var* ccv) {
 	uint32_t rtt_us = get_rtt_us(ccv);
 	uint32_t fraction = 0; // Interpolate sliding bin values that might not exactly line up with bins
 
+	nreno->search_bytes_this_bin += ccv->bytes_this_ack;
+
 	// On first ack, initialize bin duration and bin end time
 	if (nreno->search_bin_duration_us == 0) {
 		search_init_bins(ccv, now_us, rtt_us);
@@ -432,6 +437,7 @@ static void search_update(struct cc_var* ccv) {
 	if (now_us > nreno->search_bin_end_us) {
 		log(LOG_NOTICE, "SEARCH bin boundary\n");
 		if (search_update_bins(ccv, now_us, rtt_us)) {
+			// Missed > SEARCH_MISSED_BIN_RESET_THRESHOLD bins
 			return;
 		}
 

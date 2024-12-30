@@ -56,6 +56,8 @@ struct newreno {
 	search_bin_t search_bin[SEARCH_TOTAL_BINS];	// Array to keep bytes for bins
 	// uint8_t search_unused;
 	uint8_t search_scale_factor;					// Scale factor to fit value within bin size
+
+	uint16_t search_bytes_this_bin;
 	// } search;
 	// };
 };

@@ -138,7 +138,9 @@ newreno_log_hystart_event(struct cc_var *ccv, struct newreno *nreno, uint8_t mod
 	if (hystart_bblogs == 0)
 		return;
 	tp = ccv->tp;
+	log(LOG_DEBUG, "TCP bblogging: %d\n", tcp_bblogging_on(tp));
 	if (tcp_bblogging_on(tp)) {
+		log(LOG_DEBUG, "Logging Hystart++ bblog: %hhu\n", mod);
 		union tcp_log_stackspecific log;
 		struct timeval tv;
 
@@ -175,6 +177,7 @@ newreno_data_sz(void)
 static int
 newreno_cb_init(struct cc_var *ccv, void *ptr)
 {
+	log(LOG_DEBUG, "New newreno cb\n");
 	struct newreno *nreno;
 
 	INP_WLOCK_ASSERT(tptoinpcb(ccv->tp));
@@ -197,7 +200,7 @@ newreno_cb_init(struct cc_var *ccv, void *ptr)
 		nreno->newreno_flags = CC_NEWRENO_HYSTART_ENABLED;
 	} else {
 		nreno->newreno_flags = 0;
-		log(LOG_DEBUG, "Hystart++ disabled\n");
+		log(LOG_NOTICE, "Hystart++ disabled\n");
 	}
 	/* At init set both to infinity */
 	nreno->css_lastround_minrtt = 0xffffffff;

@@ -291,8 +291,8 @@ static void search_init_bins(struct cc_var* ccv, uint64_t now_us, uint32_t rtt_u
 
 	search_reset(nreno);
 
-	// nreno->search_bin_duration_us = (rtt_us * 35) / (SEARCH_BINS * 10);
-	nreno->search_bin_duration_us = SEARCH_WINDOW_SIZE(rtt_us) / SEARCH_BINS;
+	nreno->search_bin_duration_us = SEARCH_BIN_DURATION_US(rtt_us);
+	// nreno->search_bin_duration_us = SEARCH_WINDOW_SIZE(rtt_us) / SEARCH_BINS;
 	nreno->search_bin_end_us = now_us + nreno->search_bin_duration_us;
 	nreno->search_curr_idx = -1;
 }

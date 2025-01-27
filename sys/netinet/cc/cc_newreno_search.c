@@ -409,7 +409,7 @@ static void search_exit_slow_start(struct cc_var* ccv, uint32_t now_us, uint32_t
 	 }
 
 	log(LOG_NOTICE, "SEARCH: Exit slow start with ssthresh = %u", CCV(ccv, snd_cwnd));
-	//  CCV(ccv, snd_ssthresh) = CCV(ccv, snd_cwnd);
+	 CCV(ccv, snd_ssthresh) = CCV(ccv, snd_cwnd);
 }
 
 // <<<<<SEARCH IMPL>>>>> SEARCH update

@@ -259,7 +259,7 @@ static uint64_t get_now_us(void) {
 static uint32_t get_rtt_us(struct cc_var* ccv) {
 	// struct ertt* e_t = khelp_get_osd(&CCV(ccv, t_osd), ertt_id);
 	// return (e_t->rtt);
-	return CCV(ccv, t_srtt) * 1000;
+	return CCV(ccv, t_srtt) * tick;
 }
 
 /*

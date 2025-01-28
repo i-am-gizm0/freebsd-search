@@ -476,6 +476,7 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 
 	nreno = ccv->cc_data;
 	uint32_t rtt_us = get_rtt_us(ccv);
+	/*
 	int32_t prev_idx = nreno->search_bin_duration_us == 0 ? -1 : nreno->search_curr_idx - (rtt_us / nreno->search_bin_duration_us);
 	uint64_t curr_delv_bytes = search_compute_delivered_window(ccv, nreno->search_curr_idx - SEARCH_BINS, nreno->search_curr_idx, 0);	// Bytes delivered in the current rolling RTT
 	int64_t prev_delv_bytes = nreno->search_bin_duration_us == 0 ? -1 : search_compute_delivered_window(ccv, prev_idx - SEARCH_BINS, prev_idx, ((rtt_us % nreno->search_bin_duration_us) * 100 / nreno -> search_bin_duration_us));	// Bytes delivered in the previous rolling RTT
@@ -527,6 +528,11 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 		nreno->search_bin[24]);
 	log(LOG_NOTICE, "<%p> SEARCH bin dbg: %s\n", ccv, bin_dbg_buf);
 	free(bin_dbg_buf, M_BIN_DBG);
+	*/
+
+	struct ertt* e_t = khelp_get_osd(&CCV(ccv, t_osd), ertt_id);
+
+	log(LOG_INFO, "<%p> SEARCH ACK: [now %lu] [t_srtt %u] [h_ertt %u]\n", ccv, get_now_us(), rtt_us, e_t->rtt);
 
 	if (type == CC_ACK && !IN_RECOVERY(CCV(ccv, t_flags)) &&
 	    (ccv->flags & CCF_CWND_LIMITED)) {

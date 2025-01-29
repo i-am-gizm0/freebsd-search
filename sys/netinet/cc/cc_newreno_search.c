@@ -200,7 +200,7 @@ static void search_reset(struct newreno* nreno) {
 	nreno->search_curr_idx = -1;
 	nreno->search_bin_end_us = 0;
 	nreno->search_scale_factor = 0;
-	// nreno->search_bytes_this_bin = 0;
+	nreno->search_bytes_this_bin = 0;
 }
 
 static int
@@ -256,10 +256,10 @@ static uint64_t get_now_us(void) {
 	return (tv.tv_sec * 1000000) + tv.tv_usec;
 }
 
-static uint32_t get_rtt_us(struct cc_var* ccv) {
+static uint64_t get_rtt_us(struct cc_var* ccv) {
 	// struct ertt* e_t = khelp_get_osd(&CCV(ccv, t_osd), ertt_id);
 	// return (e_t->rtt);
-	return CCV(ccv, t_srtt) * tick;
+	return ((uint64_t)CCV(ccv, t_srtt) * tick) >> TCP_RTT_SHIFT;
 }
 
 /*
@@ -287,7 +287,7 @@ static void search_rescale_bins(struct cc_var* ccv, uint64_t* bin_value) {
 	nreno->search_scale_factor += num_shift;
 }
 
-static void search_init_bins(struct cc_var* ccv, uint64_t now_us, uint32_t rtt_us) {
+static void search_init_bins(struct cc_var* ccv, uint64_t now_us, uint64_t rtt_us) {
 	struct newreno* nreno = ccv->cc_data;
 
 	search_reset(nreno);
@@ -296,13 +296,18 @@ static void search_init_bins(struct cc_var* ccv, uint64_t now_us, uint32_t rtt_u
 	// nreno->search_bin_duration_us = SEARCH_WINDOW_SIZE(rtt_us) / SEARCH_BINS;
 	nreno->search_bin_end_us = now_us + nreno->search_bin_duration_us;
 	nreno->search_curr_idx = -1;
-	log(LOG_NOTICE, "<%p> INIT BINS [duration %d] [end %ld]\n",
+	log(LOG_NOTICE, "<%p> INIT BINS [now_us %lu] [rtt_us %lu] [duration %d] [end %ld]\n",
 		ccv,
+		now_us,
+		rtt_us,
 		nreno->search_bin_duration_us,
 		nreno->search_bin_end_us);
 }
 
-static int search_update_bins(struct cc_var* ccv, uint64_t now_us, uint32_t rtt_us) {
+MALLOC_DECLARE(M_BIN_DBG);
+MALLOC_DEFINE(M_BIN_DBG, "searchbindbg", "Buffer to print SEARCH bin debug info");
+
+static int search_update_bins(struct cc_var* ccv, uint64_t now_us, uint64_t rtt_us) {
 	struct newreno* nreno = ccv->cc_data;
 
 	// passed_bins > 1 means we missed some bins
@@ -310,23 +315,79 @@ static int search_update_bins(struct cc_var* ccv, uint64_t now_us, uint32_t rtt_
 
 	/* If we passed more than SEARCH_MISSED_BIN_RESET_THRESHOLD bins, need to reset SEARCH, and initialize bins*/
 	if (passed_bins > SEARCH_MISSED_BIN_RESET_THRESHOLD) {
-		log(LOG_NOTICE, "<%p> SEARCH RESET passed %u bins!\n", ccv, passed_bins);
+		log(LOG_NOTICE, "<%p> SEARCH RESET! Passed %u bins!\n", ccv, passed_bins);
 		search_reset(nreno);
 		search_init_bins(ccv, now_us, rtt_us);
 		return 1;
-	}
-	if (passed_bins != 0) {
+	} else if (passed_bins > 1) {
 		log(LOG_NOTICE, "<%p> SEARCH passed %u bins! Filling missing data\n", ccv, passed_bins);
-	}
-	for (uint32_t i = nreno->search_curr_idx + 1; i < nreno->search_curr_idx + passed_bins; i++) {
-		SEARCH_BIN(ccv, i) = SEARCH_BIN(ccv, nreno->search_curr_idx);
+		for (uint32_t i = nreno->search_curr_idx + 1; i < nreno->search_curr_idx + passed_bins; i++) {
+			SEARCH_BIN(ccv, i) = SEARCH_BIN(ccv, nreno->search_curr_idx);
+		}
 	}
 
 	nreno->search_curr_idx += passed_bins;
 	nreno->search_bin_end_us += passed_bins * nreno->search_bin_duration_us;
+	struct ertt* e_t = khelp_get_osd(&CCV(ccv, t_osd), ertt_id);
+
+	log(LOG_INFO, "<%p> SEARCH ACK: [now %lu] [srtt %lu] [ertt %d] [new_ertt %d] [curack %u] [curr_idx %d] [bin_end_us %lu] [cwnd %u] [ssthresh %u]\n",
+		ccv,
+		now_us,
+		rtt_us,
+		e_t->rtt,
+		e_t->flags & ERTT_NEW_MEASUREMENT,
+		ccv->curack,
+		nreno->search_curr_idx,
+		nreno->search_bin_end_us,
+		CCV(ccv, snd_cwnd),
+		CCV(ccv, snd_ssthresh)
+	);
+
+	if (e_t->flags & ERTT_NEW_MEASUREMENT) {
+		e_t->flags &= ~ERTT_NEW_MEASUREMENT;
+	}
+
+	char* bin_dbg_buf = malloc(512 * sizeof(char), M_BIN_DBG, M_NOWAIT);
+	if (bin_dbg_buf == NULL) {
+		panic("Could not allocate memory for bin debug buffer");
+	}
+	snprintf(
+		bin_dbg_buf,
+		512,
+		"%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t",
+		nreno->search_bin[0],
+		nreno->search_bin[1],
+		nreno->search_bin[2],
+		nreno->search_bin[3],
+		nreno->search_bin[4],
+		nreno->search_bin[5],
+		nreno->search_bin[6],
+		nreno->search_bin[7],
+		nreno->search_bin[8],
+		nreno->search_bin[9],
+		nreno->search_bin[10],
+		nreno->search_bin[11],
+		nreno->search_bin[12],
+		nreno->search_bin[13],
+		nreno->search_bin[14],
+		nreno->search_bin[15],
+		nreno->search_bin[16],
+		nreno->search_bin[17],
+		nreno->search_bin[18],
+		nreno->search_bin[19],
+		nreno->search_bin[20],
+		nreno->search_bin[21],
+		nreno->search_bin[22],
+		nreno->search_bin[23],
+		nreno->search_bin[24]);
+	log(LOG_NOTICE, "<%p> SEARCH bin dbg: %s\n", ccv, bin_dbg_buf);
+	free(bin_dbg_buf, M_BIN_DBG);
 
 	// Calculate bin_value by dividing bytes_acked by 2^scale_factor
-	uint64_t bin_value = ccv->curack >> nreno->search_scale_factor;
+	uint64_t bin_value = (nreno->search_bytes_this_bin >> nreno->search_scale_factor);
+	if (nreno->search_curr_idx > 0) 
+		bin_value += SEARCH_BIN(ccv, nreno->search_curr_idx - 1);
+	nreno->search_bytes_this_bin = 0;
 
 	if (bin_value > MAX_SEARCH_BIN_VALUE) {
 		search_rescale_bins(ccv, &bin_value);
@@ -400,15 +461,15 @@ static void search_exit_slow_start(struct cc_var* ccv, uint32_t now_us, uint32_t
 		 * or is not larger than the current cwnd (in case of TCP reset)
 		 */
 		if (overshoot_cwnd < CCV(ccv, snd_cwnd)) {
-			log(LOG_NOTICE, "cwnd: setting for search rollback");
+			log(LOG_NOTICE, "cwnd: setting for search rollback\n");
 			CCV(ccv, snd_cwnd) = max(CCV(ccv, snd_cwnd) - overshoot_cwnd, V_tcp_initcwnd_segments);
 		} else {
-			log(LOG_NOTICE, "cwnd: search rollback resetting to initial");
+			log(LOG_NOTICE, "cwnd: search rollback resetting to initial\n");
 			CCV(ccv, snd_cwnd) = V_tcp_initcwnd_segments;
 		}
 	 }
 
-	log(LOG_NOTICE, "SEARCH: Exit slow start with ssthresh = %u", CCV(ccv, snd_cwnd));
+	log(LOG_NOTICE, "<%p> SEARCH: Exit slow start with ssthresh = %u\n", ccv, CCV(ccv, snd_cwnd));
 	 CCV(ccv, snd_ssthresh) = CCV(ccv, snd_cwnd);
 }
 
@@ -418,7 +479,7 @@ static void search_update(struct cc_var* ccv) {
 	struct newreno* nreno = ccv->cc_data;
 
 	uint64_t now_us = get_now_us();
-	uint32_t rtt_us = get_rtt_us(ccv);
+	uint64_t rtt_us = get_rtt_us(ccv);
 
 	int32_t prev_idx = 0;
 	uint64_t curr_delv_bytes = 0;	// Bytes delivered in the current rolling RTT
@@ -436,7 +497,7 @@ static void search_update(struct cc_var* ccv) {
 
 	// If we have reached the bin boundary,
 	if (now_us > nreno->search_bin_end_us) {
-		log(LOG_NOTICE, "SEARCH bin boundary\n");
+		log(LOG_NOTICE, "<%p> SEARCH bin boundary\n", ccv);
 		if (search_update_bins(ccv, now_us, rtt_us)) {
 			// Missed > SEARCH_MISSED_BIN_RESET_THRESHOLD bins
 			return;
@@ -466,16 +527,13 @@ static void search_update(struct cc_var* ccv) {
 	}
 }
 
-MALLOC_DECLARE(M_BIN_DBG);
-MALLOC_DEFINE(M_BIN_DBG, "searchbindbg", "Buffer to print SEARCH bin debug info");
-
 static void
 newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 {
 	struct newreno *nreno;
 
 	nreno = ccv->cc_data;
-	uint32_t rtt_us = get_rtt_us(ccv);
+	uint64_t rtt_us = get_rtt_us(ccv);
 	/*
 	int32_t prev_idx = nreno->search_bin_duration_us == 0 ? -1 : nreno->search_curr_idx - (rtt_us / nreno->search_bin_duration_us);
 	uint64_t curr_delv_bytes = search_compute_delivered_window(ccv, nreno->search_curr_idx - SEARCH_BINS, nreno->search_curr_idx, 0);	// Bytes delivered in the current rolling RTT
@@ -532,7 +590,12 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 
 	struct ertt* e_t = khelp_get_osd(&CCV(ccv, t_osd), ertt_id);
 
-	log(LOG_INFO, "<%p> SEARCH ACK: [now %lu] [t_srtt %u] [h_ertt %u]\n", ccv, get_now_us(), rtt_us, e_t->rtt);
+	log(LOG_INFO, "<%p> SEARCH ACK: [now %lu] [t_srtt %lu] [h_ertt %u]", ccv, get_now_us(), rtt_us, e_t->rtt);
+	if (e_t->flags & ERTT_NEW_MEASUREMENT) {
+		log(LOG_INFO, " new!");
+		e_t->flags &= ~ERTT_NEW_MEASUREMENT;
+	}
+	log(LOG_INFO, "\n");
 
 	if (type == CC_ACK && !IN_RECOVERY(CCV(ccv, t_flags)) &&
 	    (ccv->flags & CCF_CWND_LIMITED)) {
@@ -662,7 +725,7 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 		}
 		/* ABC is on by default, so incr equals 0 frequently. */
 		if (incr > 0) {
-			log(LOG_NOTICE, "cwnd: increasing in cwnd_limited (slow start)\n");
+			log(LOG_NOTICE, "<%p> cwnd: increasing in cwnd_limited (slow start)\n", ccv);
 			CCV(ccv, snd_cwnd) = min(cw + incr,
 			    TCP_MAXWIN << CCV(ccv, snd_scale));
 		}

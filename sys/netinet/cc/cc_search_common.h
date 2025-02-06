@@ -22,7 +22,7 @@ typedef uint16_t search_bin_t;
 /**
  * Enable cwnd rollback (on exit, reduce cwnd to its value 2 InitRTT ago, to avoid congestion)
  */
-#define SEARCH_ROLLBACK 1
+#define SEARCH_ROLLBACK 0
 
 #define SEARCH_WINDOW_SIZE_TENTH_US(initial_rtt) initial_rtt * SEARCH_WINDOW_SIZE_FACTOR
 #define SEARCH_BIN_DURATION_US(initial_rtt) SEARCH_WINDOW_SIZE_TENTH_US(initial_rtt) / (SEARCH_BINS * 10)

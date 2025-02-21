@@ -227,7 +227,7 @@ newreno_cb_init(struct cc_var *ccv, void *ptr)
 	 * the socket option gets strobed and
 	 * we have not hit a loss
 	 */
-	nreno->newreno_flags = 0; //CC_NEWRENO_HYSTART_ENABLED;
+	nreno->newreno_flags = CC_NEWRENO_HYSTART_ENABLED;
 	/* At init set both to infinity */
 	nreno->css_lastround_minrtt = 0xffffffff;
 	nreno->css_current_round_minrtt = 0xffffffff;
@@ -383,7 +383,7 @@ static uint64_t search_compute_delivered_window(struct cc_var* ccv, int32_t inde
 	return delivered;
 }
 
-static void search_exit_slow_start(struct cc_var* ccv, uint32_t now_us, uint32_t rtt_us) {
+static void search_exit_slow_start(struct cc_var* ccv, uint64_t now_us, uint64_t rtt_us) {
 	struct newreno* nreno = ccv->cc_data;
 
 	int32_t cong_idx = 0;
@@ -434,7 +434,7 @@ static void search_exit_slow_start(struct cc_var* ccv, uint32_t now_us, uint32_t
 		}
 	 }
 
-	log(LOG_INFO, "<%p> SEARCH: Exit slow start with ssthresh = %u\n", ccv, CCV(ccv, snd_cwnd));
+	log(LOG_INFO, "<%p> [now %lu] SEARCH: Exit slow start with ssthresh = %u\n", ccv, now_us, CCV(ccv, snd_cwnd));
 	nreno->search_exited = 1;
 	// CCV(ccv, snd_ssthresh) = CCV(ccv, snd_cwnd);
 }
@@ -448,8 +448,8 @@ static void search_update(struct cc_var* ccv) {
 	uint64_t rtt_us = get_rtt_us(ccv);
 
 	int32_t prev_idx = 0;
-	uint64_t curr_delv_bytes = 0;	// Bytes delivered in the current rolling RTT
-	uint64_t prev_delv_bytes = 0;	// Bytes delivered in the previous rolling RTT
+	int64_t curr_delv_bytes = 0;	// Bytes delivered in the current rolling RTT
+	int64_t prev_delv_bytes = 0;	// Bytes delivered in the previous rolling RTT
 	int32_t norm_diff = 0; 			// Ratio of expected/actual delivered bytes in the current rolling RTT
 	uint32_t fraction = 0; // Interpolate sliding bin values that might not exactly line up with bins
 
@@ -480,7 +480,7 @@ static void search_update(struct cc_var* ccv) {
 			fraction = ((rtt_us % nreno->search_bin_duration_us) * 100 / nreno -> search_bin_duration_us);
 			prev_delv_bytes = search_compute_delivered_window(ccv, prev_idx - SEARCH_BINS, prev_idx, fraction);
 #ifdef SEARCH_LOG_ENABLED
-			log(LOG_INFO, " [curr_delv_bytes %lu] [fraction %d] [prev_delv_bytes %lu]", curr_delv_bytes, fraction, prev_delv_bytes);
+			log(LOG_INFO, " [curr_delv_bytes %ld] [fraction %d] [prev_delv_bytes %ld]", curr_delv_bytes, fraction, prev_delv_bytes);
 #endif
 			if (prev_delv_bytes > 0) {
 				norm_diff = ((2 * prev_delv_bytes) - curr_delv_bytes) * 100 / (2 * prev_delv_bytes);
@@ -561,7 +561,7 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 				 * We have slipped into CA with
 				 * CSS active. Deactivate all.
 				 */
-				log(LOG_NOTICE, "Exiting Hystart++ CSS\n");
+				log(LOG_INFO, "<%p> Exiting Hystart++ CSS\n", ccv);
 				/* Turn off the CSS flag */
 				nreno->newreno_flags &= ~CC_NEWRENO_HYSTART_IN_CSS;
 				/* Disable use of CSS in the future except long idle  */
@@ -595,7 +595,7 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 					abc_val = ccv->labc;
 				else
 					abc_val = V_tcp_abc_l_var;
-				if ((ccv->flags & CCF_HYSTART_ALLOWED) &&
+				if (////(ccv->flags & CCF_HYSTART_ALLOWED) &&
 					(nreno->newreno_flags & CC_NEWRENO_HYSTART_ENABLED) &&
 					((nreno->newreno_flags & CC_NEWRENO_HYSTART_IN_CSS) == 0)) {
 					/*
@@ -619,6 +619,7 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 							/* Enter CSS */
 							nreno->newreno_flags |= CC_NEWRENO_HYSTART_IN_CSS;
 							nreno->css_fas_at_css_entry = nreno->css_lowrtt_fas;
+							log(LOG_INFO, "<%p> [now %lu] Hystart++ Entering CSS\n", ccv, get_now_us());
 							/*
 							* The draft (v4) calls for us to set baseline to css_current_round_min
 							* but that can cause an oscillation. We probably shoudl be using
@@ -641,7 +642,7 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 
 				/* Only if Hystart is enabled will the flag get set */
 				if (nreno->newreno_flags & CC_NEWRENO_HYSTART_IN_CSS) {
-					incr /= hystart_css_growth_div;
+					//// incr /= hystart_css_growth_div;
 					newreno_log_hystart_event(ccv, nreno, 3, incr);
 				}
 			}
@@ -663,8 +664,10 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 static void
 newreno_after_idle(struct cc_var *ccv)
 {
-	log(LOG_NOTICE, "After idle\n");
+	uint64_t now_us = get_now_us();
+	log(LOG_NOTICE, "<%p> [now %lu] After idle\n", ccv, now_us);
 	struct newreno *nreno;
+
 
 	nreno = ccv->cc_data;
 	newreno_cc_after_idle(ccv);
@@ -673,8 +676,9 @@ newreno_after_idle(struct cc_var *ccv)
 		 * Re-enable hystart if we have been idle.
 		 */
 		nreno->newreno_flags &= ~CC_NEWRENO_HYSTART_IN_CSS;
-		// nreno->newreno_flags |= CC_NEWRENO_HYSTART_ENABLED;
+		nreno->newreno_flags |= CC_NEWRENO_HYSTART_ENABLED;
 		newreno_log_hystart_event(ccv, nreno, 12, CCV(ccv, snd_ssthresh));
+		log(LOG_INFO, "<%p> [now %lu] Re-enabling Hystart++ after idle\n", ccv, now_us);
 	} // else if doing search
 	// then unstop search
 	search_reset(nreno);
@@ -688,6 +692,8 @@ newreno_cong_signal(struct cc_var *ccv, ccsignal_t type)
 {
 	struct newreno *nreno;
 	uint32_t beta, beta_ecn, cwin, factor, mss, pipe;
+
+	uint64_t now_us = get_now_us();
 
 	cwin = CCV(ccv, snd_cwnd);
 	mss = tcp_fixed_maxseg(ccv->tp);
@@ -717,6 +723,7 @@ newreno_cong_signal(struct cc_var *ccv, ccsignal_t type)
 	switch (type) {
 	case CC_NDUPACK:
 		if (nreno->newreno_flags & CC_NEWRENO_HYSTART_ENABLED) {
+			log(LOG_INFO, "<%p> [now %lu] Disabling Hystart++ at loss\n", ccv, now_us);
 			/* Make sure the flags are all off we had a loss */
 			nreno->newreno_flags &= ~CC_NEWRENO_HYSTART_ENABLED;
 			nreno->newreno_flags &= ~CC_NEWRENO_HYSTART_IN_CSS;
@@ -726,16 +733,16 @@ newreno_cong_signal(struct cc_var *ccv, ccsignal_t type)
 		if (!IN_FASTRECOVERY(CCV(ccv, t_flags))) {
 			if (IN_CONGRECOVERY(CCV(ccv, t_flags) &&
 			    V_cc_do_abe && V_cc_abe_frlossreduce)) {
-				log(LOG_INFO, "NewReno Cong signal: dup ack in cong recovery. setting ssthresh\n");
+				log(LOG_INFO, "<%p> [now %lu] NewReno Cong signal: dup ack in cong recovery. setting ssthresh\n", ccv, now_us);
 				CCV(ccv, snd_ssthresh) =
 				    ((uint64_t)CCV(ccv, snd_ssthresh) *
 				     (uint64_t)beta) / (uint64_t)beta_ecn; // SET SSTHRESH
 			}
 			if (!IN_CONGRECOVERY(CCV(ccv, t_flags))) {
-				log(LOG_INFO, "NewReno Cong signal: dup ack not in cong recovery. setting ssthresh\n");
+				log(LOG_INFO, "<%p> [now %lu] NewReno Cong signal: dup ack not in cong recovery. setting ssthresh\n", ccv, now_us);
 				CCV(ccv, snd_ssthresh) = cwin; // SET SSTHRESH
 			}
-			log(LOG_INFO, "Entering recovery, dup ack threshold reached\n");
+			log(LOG_INFO, "<%p> [now %lu] Entering recovery, dup ack threshold reached\n", ccv, now_us);
 			ENTER_RECOVERY(CCV(ccv, t_flags));
 		}
 		break;
@@ -765,13 +772,13 @@ newreno_cong_signal(struct cc_var *ccv, ccsignal_t type)
 					CCV(ccv, snd_fack) +
 					CCV(ccv, sackhint.sack_bytes_rexmit);
 			}
-			log(LOG_NOTICE, "NewReno Cong signal: RTO. setting ssthresh\n");
+			log(LOG_NOTICE, "<%p> [now %lu] NewReno Cong signal: RTO. setting ssthresh\n", ccv, now_us);
 			CCV(ccv, snd_ssthresh) = max(2,
 				((uint64_t)min(CCV(ccv, snd_wnd), pipe) *
 				    (uint64_t)factor) /
 				    (100ULL * (uint64_t)mss)) * mss; // SET SSTHRESH
 		}
-		log(LOG_NOTICE, "cwnd: cong sig RTO - setting to MSS");
+		log(LOG_NOTICE, "<%p> [now %lu] cwnd: cong sig RTO - setting to MSS", ccv, now_us);
 		CCV(ccv, snd_cwnd) = mss;
 		break;
 	default:
@@ -850,6 +857,7 @@ static void
 newreno_newround(struct cc_var *ccv, uint32_t round_cnt)
 {
 	struct newreno *nreno;
+	uint64_t now_us = get_now_us();
 
 	nreno = (struct newreno *)ccv->cc_data;
 	/* We have entered a new round */
@@ -868,18 +876,18 @@ newreno_newround(struct cc_var *ccv, uint32_t round_cnt)
 			 * and give us hystart_css_rounds more rounds.
 			 */
 			if (ccv->flags & CCF_HYSTART_CONS_SSTH) {
-				log(LOG_NOTICE, "NewReno Hystart++: SS->CSS (CA). Setting ssthresh (true)\n");
-				CCV(ccv, snd_ssthresh) = ((nreno->css_lowrtt_fas + nreno->css_fas_at_css_entry) / 2); // SET SSTHRESH
+				log(LOG_NOTICE, "<%p> [now %lu] NewReno Hystart++: SS->CSS (CA). Setting ssthresh (true)\n", ccv, now_us);
+				//// CCV(ccv, snd_ssthresh) = ((nreno->css_lowrtt_fas + nreno->css_fas_at_css_entry) / 2); // SET SSTHRESH
 			} else {
-				log(LOG_NOTICE, "NewReno Hystart++: SS->CSS (CA). Setting ssthresh (false)\n");
-				CCV(ccv, snd_ssthresh) = nreno->css_lowrtt_fas; // SET SSTHRESH
+				log(LOG_NOTICE, "<%p> [now %lu] NewReno Hystart++: SS->CSS (CA). Setting ssthresh (false)\n", ccv, now_us);
+				//// CCV(ccv, snd_ssthresh) = nreno->css_lowrtt_fas; // SET SSTHRESH
 			}
-			log(LOG_NOTICE, "cwnd: newreno setting in css");
-			CCV(ccv, snd_cwnd) = nreno->css_fas_at_css_entry;
+			log(LOG_NOTICE, "<%p> [now %lu] cwnd: newreno setting in css", ccv, now_us);
+			//// CCV(ccv, snd_cwnd) = nreno->css_fas_at_css_entry;
 			nreno->css_entered_at_round = round_cnt;
 		} else {
-			log(LOG_NOTICE, "NewReno Hystart++: SS->CA. Setting ssthresh to cwnd\n");
-			CCV(ccv, snd_ssthresh) = CCV(ccv, snd_cwnd); // SET SSTHRESH
+			log(LOG_NOTICE, "<%p> [now %lu] NewReno Hystart++: SS->CA. Setting ssthresh to cwnd\n", ccv, now_us);
+			//// CCV(ccv, snd_ssthresh) = CCV(ccv, snd_cwnd); // SET SSTHRESH
 			/* Turn off the CSS flag */
 			nreno->newreno_flags &= ~CC_NEWRENO_HYSTART_IN_CSS;
 			/* Disable use of CSS in the future except long idle  */
@@ -917,6 +925,7 @@ newreno_rttsample(struct cc_var *ccv, uint32_t usec_rtt, uint32_t rxtcnt, uint32
 		 * We were in CSS and the RTT is now less, we
 		 * entered CSS erroneously.
 		 */
+		log(LOG_NOTICE, "<%p> NewReno Hystart++: CSS->SS (erroneous CSS)\n", ccv);
 		nreno->newreno_flags &= ~CC_NEWRENO_HYSTART_IN_CSS;
 		newreno_log_hystart_event(ccv, nreno, 8, nreno->css_baseline_minrtt);
 		nreno->css_baseline_minrtt = 0xffffffff;

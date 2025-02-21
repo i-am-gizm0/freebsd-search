@@ -1,9 +1,9 @@
 #ifndef _CC_SEARCH_COMMON_H
 #define _CC_SEARCH_COMMON_H
 
-#define MAX_SEARCH_BIN_VALUE 0xFFFF
+#define MAX_SEARCH_BIN_VALUE 0xFFFFFFFF
 
-typedef uint16_t search_bin_t;
+typedef uint32_t search_bin_t;
 
 /* "WINDOW_SIZE" * 10 */
 #define SEARCH_WINDOW_SIZE_FACTOR 35

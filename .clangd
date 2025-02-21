@@ -1,2 +1,2 @@
 CompileFlags:
-    Add: [ -D_KERNEL, -DKLD_MODULE, -nostdinc, -I/usr/src/sys, -I/usr/obj/usr/src/amd64.amd64/sys/modules/cc/cc_cubic_search, -I/usr/src/sys/modules/cc/cc_cubic_search ]
+    Add: [ -DINET -D_KERNEL, -DKLD_MODULE, -nostdinc, -I/usr/src/sys, -I/usr/obj/usr/src/amd64.amd64/sys/modules/cc/cc_newreno_search, -I/usr/src/sys/modules/cc/cc_newreno_search ]

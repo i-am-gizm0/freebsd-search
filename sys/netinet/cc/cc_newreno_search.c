@@ -85,7 +85,7 @@
 #include <netinet/cc/cc_module.h>
 #include <netinet/cc/cc_newreno_search.h>
 #include <netinet/cc/cc_search_common.h>
-#include "sys/time.h"
+// #include "sys/time.h"
 
 #include <sys/syslog.h>
 

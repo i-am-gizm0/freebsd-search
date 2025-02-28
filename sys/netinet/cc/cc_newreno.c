@@ -85,7 +85,7 @@
 
 #include <sys/syslog.h>
 
-#define SEARCH_LOG_ENABLED
+// #define SEARCH_LOG_ENABLED
 
 static void	newreno_cb_destroy(struct cc_var *ccv);
 static void	newreno_ack_received(struct cc_var *ccv, ccsignal_t type);
@@ -222,9 +222,9 @@ static uint64_t get_now_us(void) {
 	return (tv.tv_sec * 1000000) + tv.tv_usec;
 }
 
-static uint64_t get_rtt_us(struct cc_var* ccv) {
-	return ((uint64_t)CCV(ccv, t_srtt) * tick) >> TCP_RTT_SHIFT;
-}
+// static uint64_t get_rtt_us(struct cc_var* ccv) {
+// 	return ((uint64_t)CCV(ccv, t_srtt) * tick) >> TCP_RTT_SHIFT;
+// }
 
 static void
 newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
@@ -232,10 +232,9 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 	struct newreno *nreno;
 
 	nreno = ccv->cc_data;
-	uint64_t rtt_us = get_rtt_us(ccv);
 	
-
 #ifdef SEARCH_LOG_ENABLED
+	uint64_t rtt_us = get_rtt_us(ccv);
 	log(LOG_INFO, "<%p> ACK: [now %lu] [srtt %lu] [curack %u] [cwnd %u] [ssthresh %u]\n", 
 		ccv, 
 		get_now_us(), 
@@ -284,7 +283,7 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 				 * We have slipped into CA with
 				 * CSS active. Deactivate all.
 				 */
-				log(LOG_INFO, "<%p> Exiting Hystart++ CSS\n", ccv);
+				log(LOG_INFO, "<%p> [now %lu] Exiting Hystart++ CSS\n", ccv, get_now_us());
 				/* Turn off the CSS flag */
 				nreno->newreno_flags &= ~CC_NEWRENO_HYSTART_IN_CSS;
 				/* Disable use of CSS in the future except long idle  */
@@ -296,8 +295,9 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 					ccv->flags &= ~CCF_ABC_SENTAWND;
 				else
 					incr = 0;
-			} else
+			} else {
 				incr = max((incr * incr / cw), 1);
+			}
 		} else if (V_tcp_do_rfc3465) {
 			/*
 			 * In slow-start with ABC enabled and no RTO in sight?

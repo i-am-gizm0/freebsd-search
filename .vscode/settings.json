@@ -12,5 +12,6 @@
             "filePath": "sys/netinet/cc/cc_cubic_search.c",
             "group": "Default"
         }
-    ]
+    ],
+    "editor.formatOnSave": false
 }

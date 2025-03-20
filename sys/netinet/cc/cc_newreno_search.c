@@ -323,6 +323,11 @@ static int search_update_bins(struct cc_var* ccv, uint64_t now_us, uint64_t rtt_
 		return 1;
 	} else if (passed_bins > 1) {
 		log(LOG_NOTICE, "<%p> SEARCH passed %u bins! Filling missing data\n", ccv, passed_bins);
+		if (nreno->search_curr_idx < 0) {
+			passed_bins += nreno->search_curr_idx;
+			nreno->search_curr_idx = 0;
+			log(LOG_NOTICE, "<%p> search_curr_idx < 0, setting passed_bins to %u\n", ccv, passed_bins);
+		}
 		for (uint32_t i = nreno->search_curr_idx + 1; i < nreno->search_curr_idx + passed_bins; i++) {
 			SEARCH_BIN(ccv, i) = SEARCH_BIN(ccv, nreno->search_curr_idx);
 		}

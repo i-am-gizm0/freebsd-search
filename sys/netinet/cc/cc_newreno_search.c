@@ -357,7 +357,7 @@ static int search_update_bins(struct cc_var* ccv, uint64_t now_us, uint64_t rtt_
 #ifdef SEARCH_LOG_ENABLED
 	log(LOG_INFO, "<%p> SEARCH BINS: ", ccv);
 	for (int i = 0; i < SEARCH_TOTAL_BINS; i++) {
-		log(LOG_INFO, "| %hu ", nreno->search_bin[i]);
+		log(LOG_INFO, "| %u ", nreno->search_bin[i]);
 	}
 	log(LOG_INFO, "|\n");
 #endif

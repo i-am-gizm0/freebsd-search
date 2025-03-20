@@ -251,6 +251,7 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 
 	if (type == CC_ACK && !IN_RECOVERY(CCV(ccv, t_flags)) &&
 	    (ccv->flags & CCF_CWND_LIMITED)) {
+	        log(LOG_INFO, "<%p> ACK; !recovery; cwnd_limited\n", ccv);
 		u_int cw = CCV(ccv, snd_cwnd);
 		u_int incr = CCV(ccv, t_maxseg);
 
@@ -282,6 +283,7 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 		 *   avoid capping cwnd.
 		 */
 		if (cw > CCV(ccv, snd_ssthresh)) {
+		        log(LOG_INFO, "<%p> cwnd>ssthresh\n", ccv);
 			if (nreno->newreno_flags & CC_NEWRENO_HYSTART_IN_CSS) {
 				/*
 				 * We have slipped into CA with
@@ -302,7 +304,9 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 			} else {
 				incr = max((incr * incr / cw), 1);
 			}
+			log(LOG_INFO, "<%p> CA incr %u\n", ccv, incr);
 		} else if (V_tcp_do_rfc3465) {
+		        log(LOG_INFO, "<%p> do rfc3465\n", ccv);
 			/*
 			 * In slow-start with ABC enabled and no RTO in sight?
 			 * (Must not use abc_l_var > 1 if slow starting after
@@ -319,9 +323,11 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 				abc_val = ccv->labc;
 			else
 				abc_val = V_tcp_abc_l_var;
+			log(LOG_INFO, "<%p> Allowed? %u; Enabled? %u; !HyStartInCSS? %u\n", ccv, (ccv->flags & CCF_HYSTART_ALLOWED) != 0, (nreno->newreno_flags & CC_NEWRENO_HYSTART_ENABLED) != 0, (nreno->newreno_flags & CC_NEWRENO_HYSTART_IN_CSS) == 0);
 			if ((ccv->flags & CCF_HYSTART_ALLOWED) &&
 			    (nreno->newreno_flags & CC_NEWRENO_HYSTART_ENABLED) &&
 			    ((nreno->newreno_flags & CC_NEWRENO_HYSTART_IN_CSS) == 0)) {
+			        log(LOG_INFO, "<%p> CCF HS OK; NR HS EN; !NR HS IN CSS\n", ccv);
 				/*
 				 * Hystart is allowed and still enabled and we are not yet
 				 * in CSS. Lets check to see if we can make a decision on
@@ -339,6 +345,7 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 					if (rtt_thresh > hystart_maxrtt_thresh)
 						rtt_thresh = hystart_maxrtt_thresh;
 					newreno_log_hystart_event(ccv, nreno, 1, rtt_thresh);
+					log(LOG_INFO, "<%p> Checking HS RTT rounds\n", ccv);
 					if (nreno->css_current_round_minrtt >= (nreno->css_lastround_minrtt + rtt_thresh)) {
 						/* Enter CSS */
 						nreno->newreno_flags |= CC_NEWRENO_HYSTART_IN_CSS;
@@ -363,6 +370,7 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 				    CCV(ccv, t_maxseg));
 			else
 				incr = min(ccv->bytes_this_ack, CCV(ccv, t_maxseg));
+			log(LOG_INFO, "<%p> SS incr %u\n", ccv, incr);
 
 			/* Only if Hystart is enabled will the flag get set */
 			if (nreno->newreno_flags & CC_NEWRENO_HYSTART_IN_CSS) {
@@ -372,10 +380,13 @@ newreno_ack_received(struct cc_var *ccv, ccsignal_t type)
 			}
 		}
 		/* ABC is on by default, so incr equals 0 frequently. */
-		if (incr > 0)
+		if (incr > 0) {
 			CCV(ccv, snd_cwnd) = min(cw + incr,
 			    TCP_MAXWIN << CCV(ccv, snd_scale));
+			log(LOG_INFO, "<%p>new cwnd %u\n", ccv, CCV(ccv, snd_cwnd));
+		}
 	}
+	log(LOG_INFO, "<%p> ack_received done\n", ccv);
 }
 
 static void

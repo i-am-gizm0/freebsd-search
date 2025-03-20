@@ -50,6 +50,7 @@
  
      // struct {
      // <<<<<SEARCH>>>>>
+     uint32_t last_rtt_us;
      uint32_t search_bin_duration_us;		// Duration of each bin in microseconds
      int32_t  search_curr_idx;				// Total number of bins
      uint64_t search_bin_end_us;				// End time of the latest bin in microseconds
